@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Transaksi - FoodSave</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <link rel="stylesheet" href="HalamanTransaksi.css">
+</head>
+<body>
+
+  <section class="hero">
+    <div class="container">
+      <h1>Halaman Transaksi</h1>
+      <p>Selesaikan pembelian makanan surplusmu dengan mudah</p>
+    </div>
+  </section>
+
+  <div class="container">
+    <div class="checkout">
+
+      <div class="card">
+        <h2>Data Pembeli</h2>
+
+        <div class="form-group">
+          <label for="nama">Nama Lengkap</label>
+          <input type="text" id="nama" placeholder="Masukkan nama lengkap">
+        </div>
+
+        <div class="form-group">
+          <label for="telepon">Nomor Telepon</label>
+          <input type="text" id="telepon" placeholder="08xxxxxxxxxx">
+        </div>
+
+        <div class="form-group">
+          <label for="alamat">Alamat</label>
+          <textarea id="alamat" placeholder="Masukkan alamat lengkap"></textarea>
+        </div>
+
+        <h2>Metode Pengiriman</h2>
+        <div class="option-box">
+          <input type="radio" name="pengiriman" value="12000" checked> Kurir Instan - Rp 12.000
+        </div>
+        <div class="option-box">
+          <input type="radio" name="pengiriman" value="8000"> Same Day - Rp 8.000
+        </div>
+
+        <h2>Metode Pembayaran</h2>
+        <div class="option-box">
+          <input type="radio" name="pembayaran" value="0" checked> Transfer Bank - Gratis
+        </div>
+        <div class="option-box">
+          <input type="radio" name="pembayaran" value="1500"> E-Wallet - +Rp 1.500
+        </div>
+        <div class="option-box">
+          <input type="radio" name="pembayaran" value="3000"> Bayar di Tempat (COD) - +Rp 3.000
+        </div>
+
+        <h2>Kode Voucher</h2>
+        <div class="form-group">
+          <input type="text" id="voucher" placeholder="Contoh: FOODSAVE10">
+          <button type="button" class="btn btn-secondary" onclick="pakaiVoucher()">Gunakan Voucher</button>
+        </div>
+      </div>
+
+      <div class="card summary">
+        <h2>Ringkasan Pesanan</h2>
+        <p><span>Produk</span><span id="namaProduk">Produk belum dipilih</span></p>
+        <p><span>Jumlah</span><span id="jumlahProduk">1 pcs</span></p>
+        <p><span>Harga Produk</span><span id="hargaProduk">Rp 0</span></p>
+        <p><span>Biaya Layanan</span><span>Rp 2.000</span></p>
+        <p><span>Biaya Pengiriman</span><span id="ongkir">Rp 12.000</span></p>
+        <p><span>Biaya Pembayaran</span><span id="biayaPembayaran">Gratis</span></p>
+        <p><span>Diskon</span><span id="diskon">Rp 0</span></p>
+        <p class="total"><span>Total</span><span id="totalBayar">Rp 0</span></p>
+
+        <button type="button" class="btn" onclick="konfirmasiTransaksi()">Konfirmasi & Bayar</button>
+        <p class="note">Pastikan data yang kamu isi sudah benar.</p>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    let hargaProduk = 0;
+    let biayaLayanan = 2000;
+    let diskon = 0;
+    let jumlahProduk = 1;
+
+    const dataProduk = JSON.parse(localStorage.getItem("produkDipilih"));
+
+    function formatRupiah(angka) {
+      return "Rp " + angka.toLocaleString("id-ID");
+    }
+
+    if (dataProduk) {
+      document.getElementById("namaProduk").textContent = dataProduk.nama;
+      document.getElementById("jumlahProduk").textContent = dataProduk.jumlah + " pcs";
+      hargaProduk = dataProduk.harga * dataProduk.jumlah;
+      jumlahProduk = dataProduk.jumlah;
+      document.getElementById("hargaProduk").textContent = formatRupiah(hargaProduk);
+    }
+
+    function hitungTotal() {
+      let ongkir = parseInt(document.querySelector('input[name="pengiriman"]:checked').value);
+      let biayaPembayaran = parseInt(document.querySelector('input[name="pembayaran"]:checked').value);
+
+      let total = hargaProduk + biayaLayanan + ongkir + biayaPembayaran - diskon;
+
+      document.getElementById("ongkir").textContent = formatRupiah(ongkir);
+      document.getElementById("biayaPembayaran").textContent = biayaPembayaran === 0 ? "Gratis" : formatRupiah(biayaPembayaran);
+      document.getElementById("diskon").textContent = formatRupiah(diskon);
+      document.getElementById("totalBayar").textContent = formatRupiah(total);
+    }
+
+    function pakaiVoucher() {
+      let kode = document.getElementById("voucher").value.toUpperCase();
+
+      if (kode === "FOODSAVE10") {
+        diskon = 10000;
+        alert("Voucher berhasil dipakai. Diskon Rp 10.000");
+      } else if (kode === "") {
+        alert("Masukkan kode voucher terlebih dahulu");
+      } else {
+        diskon = 0;
+        alert("Kode voucher tidak valid");
+      }
+
+      hitungTotal();
+    }
+
+    function konfirmasiTransaksi() {
+      let nama = document.getElementById("nama").value;
+      let telepon = document.getElementById("telepon").value;
+      let alamat = document.getElementById("alamat").value;
+      let pengirimanEl = document.querySelector('input[name="pengiriman"]:checked');
+      let pembayaranEl = document.querySelector('input[name="pembayaran"]:checked');
+
+      // Ambil label metode pembayaran
+      const labelPembayaran = pembayaranEl.closest('.option-box').textContent.trim();
+      // Ambil label metode pengiriman
+      const labelPengiriman = pengirimanEl.closest('.option-box').textContent.trim();
+
+      if (nama === "" || telepon === "" || alamat === "") {
+        alert("Mohon lengkapi data pembeli terlebih dahulu");
+        return;
+      }
+
+      alert(
+        "Transaksi berhasil!\n\n" +
+        "Produk: " + document.getElementById("namaProduk").textContent + "\n" +
+        "Jumlah: " + document.getElementById("jumlahProduk").textContent + "\n" +
+        "Nama: " + nama + "\n" +
+        "Pengiriman: " + labelPengiriman + "\n" +
+        "Pembayaran: " + labelPembayaran + "\n" +
+        "Total: " + document.getElementById("totalBayar").textContent
+      );
+    }
+
+    // Event listener untuk pengiriman dan pembayaran
+    document.querySelectorAll('input[name="pengiriman"]').forEach(function(item) {
+      item.addEventListener("change", hitungTotal);
+    });
+
+    document.querySelectorAll('input[name="pembayaran"]').forEach(function(item) {
+      item.addEventListener("change", hitungTotal);
+    });
+
+    hitungTotal();
+  </script>
+</body>
+</html>

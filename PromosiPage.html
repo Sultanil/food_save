@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>FoodSave – Promo</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="PromosiPage.css"/>
+</head>
+<body>
+
+<nav>
+  <a class="logo" href="#">🌿 FoodSave</a>
+  <a href="#">Beranda</a><a href="#" style="color:#16a34a">Promo</a><a href="#">Cari Makanan</a>
+  <a href="FoodSave.html" class="btn o">🛒 Beli</a><a href="login.html" class="btn s">👤 Masuk</a>
+</nav>
+
+<div id="home" class="page active">
+  <div class="hero">
+    <h1>Hemat Lebih Banyak, <span>Selamatkan</span> Lebih Banyak!</h1>
+    <p>Diskon hingga 70% untuk makanan surplus berkualitas di sekitarmu 🌍</p>
+  </div>
+  <div class="grid" id="grid"></div>
+  <footer>© 2024 <b style="color:#16a34a">FoodSave</b> — Selamatkan Makanan, Hemat Lebih Banyak 🌿</footer>
+</div>
+
+<div id="detail" class="page">
+  <div class="detail">
+    <img id="dImg" src="" alt=""/>
+    <h2 id="dName"></h2><p id="dSeller"></p>
+    <span class="nw" id="dPrice"></span>
+    <div>
+      <button class="back" onclick="goHome()">← Kembali</button>
+      <button class="buy" onclick="beliSekarang()">Beli Sekarang</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const P=[
+  {img:"https://images.unsplash.com/photo-1604503468506-a8da13d82791?w=400&auto=format&fit=crop",disc:"-30%",name:"Daging Ayam Segar Surplus 1kg",seller:"📍 Jaya Ternak – Jombang",nw:"Rp 28.000",ol:"Rp 40.000"},
+  {img:"https://images.unsplash.com/photo-1569127959161-2b1297b2d9a6?w=400&auto=format&fit=crop",disc:"-70%",name:"Telur Ayam Surplus 1 kg",seller:"📍 Peternakan Sukses – Semarang",nw:"Rp 15.000",ol:"Rp 50.000"},
+  {img:"https://images.unsplash.com/photo-1560806887-1e4cd0b6cbd6?w=400&auto=format&fit=crop",disc:"-25%",name:"Apel Malang Surplus 1kg",seller:"📍 Petani Apel – Batu, Malang",nw:"Rp 22.000",ol:"Rp 29.000"},
+  {img:"https://images.unsplash.com/photo-1550583724-b2692b85b150?w=400&auto=format&fit=crop",disc:"-30%",name:"Susu Sapi Segar Surplus 1 Liter",seller:"📍 Peternakan Sejuk – Pacitan",nw:"Rp 8.000",ol:"Rp 12.000"},
+  {img:"https://images.unsplash.com/photo-1526346698789-22fd84314424?w=400&auto=format&fit=crop",disc:"-40%",name:"Cabai Merah Keriting Surplus Segar 250g",seller:"📍 Kebun Segar – Ngawi",nw:"Rp 12.000",ol:"Rp 20.000"},
+  {img:"https://images.unsplash.com/photo-1587049352851-8d4e89133924?w=400&auto=format&fit=crop",disc:"-50%",name:"Madu Surplus 150g",seller:"📍 Tresno Madu – Madiun",nw:"Rp 14.000",ol:"Rp 28.000"},
+];
+const g=document.getElementById('grid');
+P.forEach(p=>{
+  g.innerHTML+=`<div class="card"><img src="${p.img}" alt="${p.name}"/><div class="cb"><span class="disc">${p.disc}</span><div class="name">${p.name}</div><div class="prices"><span class="nw">${p.nw}</span><span class="ol">${p.ol}</span></div><button class="add" onclick='openDetail(${JSON.stringify(p)})'>🛒 Beli Sekarang</button></div></div>`;
+});
+function openDetail(p){
+  document.getElementById('dImg').src=p.img;
+  document.getElementById('dName').textContent=p.name;
+  document.getElementById('dSeller').textContent=p.seller;
+  document.getElementById('dPrice').textContent=p.nw;
+  document.getElementById('home').classList.remove('active');
+  document.getElementById('detail').classList.add('active');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function goHome(){
+  document.getElementById('detail').classList.remove('active');
+  document.getElementById('home').classList.add('active');
+}
+function beliSekarang() {
+  const produk = document.getElementById('dName').textContent;
+  const priceText = document.getElementById('dPrice').textContent;
+  const harga = priceText.replace(/[^0-9]/g, '');
+
+  const params = new URLSearchParams({ produk: produk, harga: harga, jumlah: 1 });
+  window.location.href = 'HalamanTransaksi.php?' + params.toString();
+}
+</script>
+
+</body>
+</html>
