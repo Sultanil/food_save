@@ -42,7 +42,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <a href="FoodSave.php">Cari Makanan</a>
   <a href="FoodSave.php" class="btn o">🛒 Beli</a>
   <a href="FoodSave.php" class="btn o">🗑️ Jual Surplus</a>
-  <a href="loginPage.php" class="btn s">👤 Masuk</a>
 </nav>
 
 <!-- HOME PAGE -->
