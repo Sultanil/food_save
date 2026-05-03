@@ -5,3 +5,24 @@ Penjual  : 📍 Petani Apel – Batu, Malang
 Harga    : Rp 22000
 ============================
 
+============================
+Waktu    : 03-05-2026 16:56:51
+Produk   : Susu Sapi Segar Surplus 1 Liter
+Penjual  : 📍 Peternakan Sejuk – Pacitan
+Harga    : Rp 8000
+============================
+
+============================
+Waktu    : 03-05-2026 17:01:06
+Produk   : Susu Sapi Segar Surplus 1 Liter
+Penjual  : 📍 Peternakan Sejuk – Pacitan
+Harga    : Rp 8000
+============================
+
+============================
+Waktu    : 03-05-2026 17:02:13
+Produk   : Susu Sapi Segar Surplus 1 Liter
+Penjual  : 📍 Peternakan Sejuk – Pacitan
+Harga    : Rp 8000
+============================
+
