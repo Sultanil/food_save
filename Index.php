@@ -47,7 +47,7 @@ $username = $is_logged_in ? htmlspecialchars($_SESSION['nama'] ?? 'Pengguna') : 
             <a href="index.php" class="font-bold text-xl text-brand">🌿 <?= htmlspecialchars($site_name) ?></a>
             
             <div class="flex items-center gap-3">
-                <?php if ($is_logged_in): ?>
+                <?php if ($is_logged_in): ?> /*kalo user sudah login, muncul menu dropdown*/ 
                     <!-- Dropdown Profil -->
                     <div class="relative group">
                         <button class="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-gray-100 transition">
@@ -66,7 +66,7 @@ $username = $is_logged_in ? htmlspecialchars($_SESSION['nama'] ?? 'Pengguna') : 
                             </form>
                         </div>
                     </div>
-                <?php else: ?>
+                <?php else: ?>  
                     <a href="RegisterPage.php" class="px-4 py-2 text-sm font-semibold text-white bg-brand rounded-lg hover:bg-brand-dark transition">Login</a>
                 <?php endif; ?>
             </div>
