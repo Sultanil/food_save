@@ -11,8 +11,10 @@ if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'pembeli') {
 }
 
 $user_id = $_SESSION['user_id'];
-$produk_id = isset($_POST['produk_id']) ? (int)$_POST['produk_id'] : 0;
-$qty = isset($_POST['qty']) ? max(1, (int)$_POST['qty']) : 1;
+
+// ✅ TERIMA DARI GET ATAU POST
+$produk_id = isset($_REQUEST['produk_id']) ? (int)$_REQUEST['produk_id'] : 0;
+$qty = isset($_REQUEST['qty']) ? max(1, (int)$_REQUEST['qty']) : 1;
 
 if (!$produk_id) {
     echo json_encode(['success' => false, 'message' => 'Produk tidak valid']);
@@ -41,7 +43,7 @@ if ($stmt->execute()) {
     $total_item = mysqli_fetch_assoc(mysqli_query($conn, 
         "SELECT SUM(qty) as total FROM keranjang WHERE user_id = $user_id"))['total'];
     
-    echo json_encode(['success' => true, 'message' => 'Produk ditambahkan ke keranjang!', 'total_item' => $total_item]);
+    echo json_encode(['success' => true, 'message' => 'Produk ditambahkan ke keranjang!', 'total_item' => $total_item ?? 0]);
 } else {
     echo json_encode(['success' => false, 'message' => 'Gagal menambahkan ke keranjang']);
 }

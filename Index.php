@@ -2,6 +2,8 @@
 session_start(); // Wajib untuk session login
 include 'koneksi.php'; // Koneksi database jika diperlukan
 
+$cart_items = [];
+$subtotal = 0;
 $site_name   = "Food Save";
 $tagline     = "Reduce Waste. Feed More. Sustain Better.";
 $description = "Dengan teknologi dan ekonomi sirkular, sisa makanan dimanfaatkan kembali menjadi nilai ekonomi yang berkelanjutan.";
@@ -115,7 +117,12 @@ if ($is_logged_in && $_SESSION['role'] === 'pembeli') {
                         </div>
                     </div>
                 <?php else: ?>
-                    <a href="RegisterPage.php" class="px-4 py-2 text-sm font-semibold text-white bg-brand rounded-lg hover:bg-brand-dark transition">Login</a>
+                    <a href="RegisterPage.php" class="px-4 py-2 text-sm font-semibold text-brand bg-white border-2 border-brand rounded-lg hover:bg-green-50 transition">
+                        Daftar
+                    </a>
+                    <a href="LoginPage.php" class="px-4 py-2 text-sm font-semibold text-white bg-brand rounded-lg hover:bg-brand-dark transition">
+                        Masuk
+                    </a>
                 <?php endif; ?>
             </div>
         </div>
@@ -126,7 +133,7 @@ if ($is_logged_in && $_SESSION['role'] === 'pembeli') {
         <h1 class="text-3xl sm:text-4xl font-bold text-gray-900 mb-4"><?= htmlspecialchars($tagline) ?></h1>
         <p class="text-gray-600 max-w-2xl mx-auto mb-8"><?= htmlspecialchars($description) ?></p>
 
-        
+
         <div class="flex flex-col sm:flex-row gap-4 justify-center">
             <?php if ($is_logged_in): ?>
                 <a href="PromosiPage.php" class="px-6 py-3 font-semibold text-white bg-brand rounded-lg hover:bg-brand-dark transition shadow">
