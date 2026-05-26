@@ -174,19 +174,11 @@ while($item = $cart_items->fetch_assoc()) {
                         
                         <!-- Tombol Checkout -->
                         <form action="checkout.php" method="POST" class="mt-6">
-                            <?php foreach($cart_array as $item): ?>
-                                <input type="hidden" name="cart_items[]" value='<?= json_encode([
-                                    'produk_id' => $item['produk_id'],
-                                    'penjual_id' => $item['penjual_id'],
-                                    'qty' => $item['qty'],
-                                    'harga' => $item['harga_satuan'],
-                                    'penjual_kode_pos' => $item['penjual_kode_pos']
-                                ]) ?>'>
-                            <?php endforeach; ?>
+                            <input type="hidden" name="cart_items" value='<?= htmlspecialchars(json_encode($cart_array)) ?>'>
                             <input type="hidden" name="subtotal" value="<?= $subtotal ?>">
                             
                             <button type="submit" 
-                                    class="w-full py-3 bg-brand hover:bg-brand-dark text-white font-semibold rounded-lg transition">
+                                    class="w-full py-3 bg-brand hover:bg-brand-dark text-white font-semibold rounded-lg transition cursor-pointer">
                                 Lanjut ke Checkout →
                             </button>
                         </form>

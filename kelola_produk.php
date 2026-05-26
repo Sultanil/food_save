@@ -8,15 +8,20 @@ if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'penjual') {
     exit;
 }
 
-// Ambil data penjual
+// Ambil data penjual & status
 $user_id = $_SESSION['user_id'];
-$stmt = $conn->prepare("SELECT id FROM penjual WHERE user_id = ?");
+$stmt = $conn->prepare("SELECT id, status_verifikasi FROM penjual WHERE user_id = ?");
 $stmt->bind_param("i", $user_id);
 $stmt->execute();
 $penjual = $stmt->get_result()->fetch_assoc();
 
 if (!$penjual) {
     header("Location: lengkapi_toko.php");
+    exit;
+}
+
+if ($penjual['status_verifikasi'] !== 'disetujui') {
+    header("Location: dashboardPenjual.php");
     exit;
 }
 $penjual_id = $penjual['id'];
@@ -57,15 +62,7 @@ $error = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     if ($action === 'delete') {
-    
-    // 🔍 CEK: Apakah produk ini sudah pernah dibeli?
-    $check_transaksi = $conn->prepare("SELECT COUNT(*) as cnt FROM transaksi WHERE produk_id = ?");
-    $check_transaksi->bind_param("i", $id);
-    $check_transaksi->execute();
-    $has_transaksi = $check_transaksi->get_result()->fetch_assoc()['cnt'] > 0;
-    
-    if ($has_transaksi) {
-        // ❌ Produk sudah pernah dibeli → SOFT DELETE (nonaktifkan saja)
+        // Selalu lakukan SOFT DELETE (nonaktifkan saja, jangan pernah hapus permanen)
         $stmt = $conn->prepare("UPDATE produk SET status = 'nonaktif' WHERE id = ? AND penjual_id = ?");
         $stmt->bind_param("ii", $id, $penjual_id);
         
@@ -75,25 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $error = "Gagal menonaktifkan produk.";
         }
-    } else {
-        // ✅ Produk belum pernah dibeli → BISA HAPUS PERMANEN
-        // Hapus file gambar dulu (jika ada)
-        if (!empty($produk['gambar_url']) && file_exists($produk['gambar_url'])) {
-            unlink($produk['gambar_url']);
-        }
-        
-        // Hapus dari database
-        $stmt = $conn->prepare("DELETE FROM produk WHERE id = ? AND penjual_id = ?");
-        $stmt->bind_param("ii", $id, $penjual_id);
-        
-        if ($stmt->execute()) {
-            header("Location: dashboardPenjual.php?msg=deleted");
-            exit;
-        } else {
-            $error = "Gagal menghapus produk.";
-        }
     }
-}
 
     } elseif ($action === 'edit') {
         // UPDATE PRODUK

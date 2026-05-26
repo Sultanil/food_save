@@ -12,8 +12,7 @@ if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'penjual') {
 $user_id = $_SESSION['user_id'] ?? 0;
 
 
-// Ambil data penjual
-$stmt = $conn->prepare("SELECT id, nama_toko FROM penjual WHERE user_id = ?");
+$stmt = $conn->prepare("SELECT id, nama_toko, status_verifikasi, alasan_penolakan FROM penjual WHERE user_id = ?");
 $stmt->bind_param("i", $user_id);
 $stmt->execute();
 $result_penjual = $stmt->get_result();
@@ -25,6 +24,8 @@ if ($result_penjual->num_rows === 0) {
 
 $penjual = $result_penjual->fetch_assoc();
 $penjual_id = $penjual['id'];
+$status_verifikasi = $penjual['status_verifikasi'] ?? 'pending';
+$alasan_penolakan = $penjual['alasan_penolakan'] ?? '';
 
 // 📦 QUERY PRODUK MILIK PENJUAL INI
 $stmt = $conn->prepare("SELECT id, nama_produk, harga_asli, harga_diskon, stok, satuan, gambar_url, status FROM produk WHERE penjual_id = ? ORDER BY created_at DESC");
@@ -76,10 +77,33 @@ $stats = $stmt_stats->get_result()->fetch_assoc();
         <main class="flex-1 p-6 md:p-8">
 
             <!-- HEADER -->
-            <div class="mb-8">
+            <div class="mb-6">
                 <h2 class="text-3xl font-bold text-gray-900">Dashboard <?= htmlspecialchars($penjual['nama_toko']) ?> 👋</h2>
                 <p class="text-gray-500 mt-1">Kelola produk dan pantau penjualan Anda</p>
             </div>
+
+            <!-- STATUS VERIFIKASI BANNER -->
+            <?php if ($status_verifikasi === 'pending'): ?>
+                <div class="bg-yellow-50 border-l-4 border-yellow-500 text-yellow-800 p-4 rounded-xl shadow-sm mb-6 flex items-start gap-3">
+                    <span class="text-2xl">⏳</span>
+                    <div>
+                        <h4 class="font-bold text-yellow-900">Pendaftaran Toko Sedang Ditinjau</h4>
+                        <p class="text-sm mt-1">Profil toko Anda sedang ditinjau oleh Admin. Anda akan dapat menambahkan produk dan mulai menerima pesanan setelah toko disetujui.</p>
+                    </div>
+                </div>
+            <?php elseif ($status_verifikasi === 'ditolak'): ?>
+                <div class="bg-red-50 border-l-4 border-red-500 text-red-800 p-4 rounded-xl shadow-sm mb-6 flex items-start gap-3">
+                    <span class="text-2xl">❌</span>
+                    <div>
+                        <h4 class="font-bold text-red-900">Pendaftaran Toko Ditolak</h4>
+                        <p class="text-sm mt-1">Maaf, pendaftaran toko Anda ditolak oleh Admin.</p>
+                        <p class="text-sm font-semibold mt-1">Alasan Penolakan: <?= htmlspecialchars($alasan_penolakan) ?></p>
+                        <a href="lengkapi_toko.php" class="inline-block mt-3 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg transition shadow">
+                            ✏️ Perbaiki Profil Toko
+                        </a>
+                    </div>
+                </div>
+            <?php endif; ?>
 
             <!-- STATS CARDS -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -118,9 +142,11 @@ $stats = $stmt_stats->get_result()->fetch_assoc();
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                 <div class="p-6 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <h3 class="font-semibold text-lg text-gray-900">Produk Saya</h3>
-                    <a href="tambah_produk.php" class="inline-flex items-center justify-center px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm font-medium transition">
+                    <?php if ($status_verifikasi === 'disetujui'): ?>
+                    <a href="tambah_produk.php" class="inline-flex items-center justify-center px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm font-medium transition cursor-pointer">
                         <span class="mr-2">+</span> Tambah Produk
                     </a>
+                    <?php endif; ?>
                 </div>
 
                 <?php if ($produk_list->num_rows === 0): ?>
@@ -129,9 +155,11 @@ $stats = $stmt_stats->get_result()->fetch_assoc();
                         <div class="text-6xl mb-4">📦</div>
                         <h3 class="text-lg font-semibold text-gray-900 mb-2">Belum Ada Produk</h3>
                         <p class="text-gray-500 mb-6">Yuk tambah produk pertama Anda dan mulai berjualan!</p>
+                        <?php if ($status_verifikasi === 'disetujui'): ?>
                         <a href="tambah_produk.php" class="inline-block px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-medium transition">
                             Tambah Produk Pertama
                         </a>
+                        <?php endif; ?>
                     </div>
                 <?php else: ?>
                     <!-- PRODUK TABLE -->

@@ -117,9 +117,16 @@ if ($is_logged_in && $_SESSION['role'] === 'pembeli') {
                         </div>
                     </div>
                 <?php else: ?>
-                    <a href="RegisterPage.php" class="px-4 py-2 text-sm font-semibold text-brand bg-white border-2 border-brand rounded-lg hover:bg-green-50 transition">
-                        Daftar
-                    </a>
+                    <!-- Dropdown Daftar -->
+                    <div class="relative group">
+                        <button class="px-4 py-2 text-sm font-semibold text-brand bg-white border-2 border-brand rounded-lg hover:bg-green-50 transition flex items-center gap-1 cursor-pointer">
+                            Daftar <span class="text-xs">▼</span>
+                        </button>
+                        <div class="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition z-50">
+                            <a href="RegisterPage.php?role=pembeli" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">🛒 Sebagai Pembeli</a>
+                            <a href="RegisterPage.php?role=penjual" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">🏪 Sebagai Penjual</a>
+                        </div>
+                    </div>
                     <a href="LoginPage.php" class="px-4 py-2 text-sm font-semibold text-white bg-brand rounded-lg hover:bg-brand-dark transition">
                         Masuk
                     </a>
@@ -140,11 +147,11 @@ if ($is_logged_in && $_SESSION['role'] === 'pembeli') {
                     Lihat Produk
                 </a>
             <?php else: ?>
-                <a href="LoginPage.php?redirect=PromosiPage.php" class="px-6 py-3 font-semibold text-white bg-brand rounded-lg hover:bg-brand-dark transition shadow">
-                    Lihat Produk
+                <a href="RegisterPage.php?role=pembeli" class="px-6 py-3 font-semibold text-white bg-brand rounded-lg hover:bg-brand-dark transition shadow">
+                    Daftar Sebagai Pembeli (Beli)
                 </a>
-                <a href="LoginPage.php?redirect=RegisterPage.php" class="px-6 py-3 font-semibold text-brand bg-white border-2 border-brand rounded-lg hover:bg-green-50 transition">
-                    Beli
+                <a href="RegisterPage.php?role=penjual" class="px-6 py-3 font-semibold text-brand bg-white border-2 border-brand rounded-lg hover:bg-green-50 transition shadow">
+                    Daftar Sebagai Penjual (Jual)
                 </a>
             <?php endif; ?>
         </div>

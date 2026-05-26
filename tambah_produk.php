@@ -8,12 +8,17 @@ if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'penjual') {
     exit;
 }
 
-// Ambil penjual_id
+// Ambil penjual_id & status
 $user_id = $_SESSION['user_id'];
-$stmt = $conn->prepare("SELECT id FROM penjual WHERE user_id = ?");
+$stmt = $conn->prepare("SELECT id, status_verifikasi FROM penjual WHERE user_id = ?");
 $stmt->bind_param("i", $user_id);
 $stmt->execute();
 $penjual = $stmt->get_result()->fetch_assoc();
+
+if (!$penjual || $penjual['status_verifikasi'] !== 'disetujui') {
+    header("Location: dashboardPenjual.php");
+    exit;
+}
 $penjual_id = $penjual['id'];
 
 $error = '';

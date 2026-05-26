@@ -4,6 +4,7 @@ include 'koneksi.php';
 
 $error = '';
 $success = '';
+$selected_role = isset($_GET['role']) && $_GET['role'] === 'penjual' ? 'penjual' : 'pembeli';
 $kode_pos_list = mysqli_query($conn, "SELECT kode_pos, kecamatan, kelurahan FROM kode_pos ORDER BY kecamatan, kelurahan");
 
 // Cek error query (opsional tapi bagus untuk debug)
@@ -54,33 +55,20 @@ if (isset($_POST['submit'])) {
                 $_SESSION['role'] = $role;
                 $_SESSION['kode_pos'] = $kode_pos; //PENTING: Simpan kode_pos ke session!
 
-                // Redirect
-                if ($stmt->execute()) {
-                    // ✅ Auto login setelah register
-                    $_SESSION['sudah_login'] = true;
-                    $_SESSION['user_id'] = $conn->insert_id;
-                    $_SESSION['nama'] = $nama_lengkap;
-                    $_SESSION['email'] = $email;
-                    $_SESSION['role'] = $role;
-                    $_SESSION['kode_pos'] = $kode_pos;
-
-                    // ✅ REDIRECT BERDASARKAN ROLE (Tambahkan ini!)
-                    switch ($role) {
-                        case 'admin':
-                            $dest = 'admin_dashboard.php';
-                            break;
-                        case 'penjual':
-                            $dest = 'dashboardPenjual.php';
-                            break;
-                        default: // pembeli
-                            $dest = 'Index.php';
-                    }
-
-                    header("Location: $dest");
-                    exit;
-                } else {
-                    $error = "Gagal mendaftar: " . mysqli_error($conn);
+                // ✅ REDIRECT BERDASARKAN ROLE
+                switch ($role) {
+                    case 'admin':
+                        $dest = 'dashboardAdmin.php';
+                        break;
+                    case 'penjual':
+                        $dest = 'dashboardPenjual.php';
+                        break;
+                    default: // pembeli
+                        $dest = 'Index.php';
                 }
+
+                header("Location: $dest");
+                exit;
             } else {
                 $error = "Gagal mendaftar: " . mysqli_error($conn);
             }
@@ -191,7 +179,7 @@ if (isset($_POST['submit'])) {
 
                         <!-- Role: Pembeli -->
                         <label class="role-card-wrapper cursor-pointer">
-                            <input type="radio" name="role" value="pembeli" checked>
+                            <input type="radio" name="role" value="pembeli" <?= $selected_role === 'pembeli' ? 'checked' : '' ?>>
                             <div class="role-card-inner border-2 border-gray-300 rounded-lg p-4 text-center input-transition">
                                 <h3 class="font-semibold text-gray-800 mb-1">Pembeli</h3>
                                 <p class="text-xs text-gray-500">Cari dan beli makanan surplus</p>
@@ -200,7 +188,7 @@ if (isset($_POST['submit'])) {
 
                         <!-- Role: Penjual -->
                         <label class="role-card-wrapper cursor-pointer">
-                            <input type="radio" name="role" value="penjual">
+                            <input type="radio" name="role" value="penjual" <?= $selected_role === 'penjual' ? 'checked' : '' ?>>
                             <div class="role-card-inner border-2 border-gray-300 rounded-lg p-4 text-center input-transition">
                                 <h3 class="font-semibold text-gray-800 mb-1">Penjual</h3>
                                 <p class="text-xs text-gray-500">Jual makanan surplus</p>

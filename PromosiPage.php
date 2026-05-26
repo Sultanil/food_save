@@ -16,7 +16,7 @@ $query = "SELECT
             p.stok, p.satuan, p.gambar_url, pj.nama_toko, pj.kota, pj.kode_pos as penjual_kode_pos
           FROM produk p
           JOIN penjual pj ON p.penjual_id = pj.id
-          WHERE p.status = 'aktif' AND p.stok > 0
+          WHERE p.status = 'aktif' AND p.stok > 0 AND pj.status_verifikasi = 'disetujui'
           ORDER BY p.created_at DESC";
 
 $result = $conn->query($query);
