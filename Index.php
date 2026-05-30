@@ -110,7 +110,15 @@ if ($is_logged_in && $_SESSION['role'] === 'pembeli') {
                         <!-- Menu Dropdown -->
                         <div class="absolute right-0 mt-2 w-40 bg-white rounded-lg shadow-lg border py-1 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition z-50">
                             <a href="profil.php" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">👤 Profil</a>
-                            <a href="pesanan.php" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">📦 Pesanan</a>
+                            <?php if ($_SESSION['role'] === 'penjual'): ?>
+                                <a href="pesanan.php" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">📦 Pesanan Masuk</a>
+                                <a href="dashboardPenjual.php" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">🏪 Dashboard Toko</a>
+                            <?php elseif ($_SESSION['role'] === 'admin'): ?>
+                                <a href="dashboardAdmin.php" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">👑 Dashboard Admin</a>
+                            <?php else: ?>
+                                <a href="riwayat_pembelian.php" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">📦 Riwayat Belanja</a>
+                                <a href="keranjang.php" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">🛒 Keranjang Belanja</a>
+                            <?php endif; ?>
                             <form method="POST" action="logout.php">
                                 <button type="submit" class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50">Logout</button>
                             </form>

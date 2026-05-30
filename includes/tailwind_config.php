@@ -1,28 +1,22 @@
 <?php // includes/tailwind_config.php ?>
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-<script type="module">
-  import tailwind from 'https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4'
-  
-  tailwind.config = {
-    theme: {
-      extend: {
-        colors: {
-          brand: {
-            DEFAULT: '#22c55e',
-            dark: '#16a34a',
-            light: '#4ade80',
-          },
-          admin: {
-            DEFAULT: '#3b82f6',
-            dark: '#2563eb',
-            light: '#60a5fa',
-          }
-        },
-        fontFamily: {
-          sans: ['Poppins', 'sans-serif'],
-        }
-      }
-    }
-  }
-</script>
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style type="text/tailwindcss">
+  @theme {
+    --color-brand: #22c55e;
+    --color-brand-dark: #16a34a;
+    --color-brand-light: #4ade80;
+    
+    --color-admin: #3b82f6;
+    --color-admin-dark: #2563eb;
+    --color-admin-light: #60a5fa;
+  }
+  body { font-family: 'Poppins', sans-serif; }
+</style>
+<style>
+  /* Standard plain CSS fallback rules */
+  .bg-brand { background-color: #22c55e !important; }
+  .hover\:bg-brand-dark:hover { background-color: #16a34a !important; }
+  .text-brand { color: #22c55e !important; }
+  .border-brand { border-color: #22c55e !important; }
+</style>

@@ -164,7 +164,7 @@ if (isset($_POST['bayar_sekarang'])) {
         $stmt_clear->execute();
         
         // Redirect ke halaman rangkuman pembayaran
-        header("Location: payment_summary.php?batch_id=$batch_id&total=$total_bayar");
+        header("Location: payment_summary.php?batch_id=$batch_id&total=$total_bayar&pembayaran=" . urlencode($pembayaran));
         exit;
     }
 }
@@ -211,11 +211,9 @@ $total_bayar = $subtotal + $biaya_layanan + $ongkir - $diskon;
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Checkout Keranjang - FoodSave</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-        body { font-family: 'Poppins', sans-serif; }
-        .input-focus { focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition; }
+    <?php include 'includes/tailwind_config.php'; ?>
+    <style type="text/tailwindcss">
+        .input-focus { @apply focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none transition; }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800 min-h-screen">
@@ -298,21 +296,21 @@ $total_bayar = $subtotal + $biaya_layanan + $ongkir - $diskon;
                         <div class="space-y-4">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Nama Lengkap *</label>
-                                <input type="text" name="nama" value="<?= htmlspecialchars($nama) ?>" required
+                                <input type="text" name="nama" value="<?= htmlspecialchars($nama) ?>"
                                        class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition"
                                        placeholder="Nama Penerima">
                             </div>
                             
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Nomor WhatsApp *</label>
-                                <input type="tel" name="telepon" value="<?= htmlspecialchars($telepon) ?>" required
+                                <input type="tel" name="telepon" value="<?= htmlspecialchars($telepon) ?>"
                                        class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition"
                                        placeholder="08xxxxxxxxxx">
                             </div>
                             
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Alamat Pengiriman Lengkap *</label>
-                                <textarea name="alamat" rows="2" required
+                                <textarea name="alamat" rows="2"
                                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none resize-none transition"
                                           placeholder="Jl. Slamet Riyadi No. 456, RT/RW, Kelurahan, Kecamatan"><?= htmlspecialchars($alamat) ?></textarea>
                             </div>
@@ -367,7 +365,7 @@ $total_bayar = $subtotal + $biaya_layanan + $ongkir - $diskon;
                             <?php $methods = ['Transfer Bank' => '🏦 Transfer Bank', 'E-Wallet' => '📱 E-Wallet', 'COD' => '💵 COD']; ?>
                             <?php foreach ($methods as $val => $desc): ?>
                             <label class="p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-green-500 transition text-center flex flex-col items-center justify-center <?= $pembayaran === $val ? 'border-green-500 bg-green-50/20' : '' ?>">
-                                <input type="radio" name="pembayaran" value="<?= $val ?>" class="hidden" <?= $pembayaran === $val ? 'checked' : '' ?> onchange="this.form.submit()">
+                                <input type="radio" name="pembayaran" value="<?= $val ?>" class="sr-only" <?= $pembayaran === $val ? 'checked' : '' ?> onchange="this.form.submit()">
                                 <div class="text-xs font-semibold text-gray-900 mt-1"><?= $desc ?></div>
                             </label>
                             <?php endforeach; ?>
