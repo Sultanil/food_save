@@ -1,4 +1,5 @@
 <?php
+include 'includes/session_check.php';
 $host = "localhost";
 $user = "root";
 $pass = "";

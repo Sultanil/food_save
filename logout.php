@@ -12,6 +12,6 @@ if (isset($_COOKIE[session_name()])) {
 }
 
 // Redirect ke halaman utama
-header("Location: index.php");
+header("Location: Index.php?msg=logged_out");
 exit;
 ?>
