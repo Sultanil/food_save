@@ -9,7 +9,8 @@ if (!isset($_SESSION['sudah_login']) || $_SESSION['sudah_login'] !== true) {
 }
 
 // Format Rupiah helper
-function formatRupiah($angka) {
+function formatRupiah($angka)
+{
     return "Rp " . number_format($angka, 0, ',', '.');
 }
 
@@ -28,7 +29,7 @@ if ($produk_id > 0 && $penjual_id > 0) {
     $stmt->bind_param("ii", $produk_id, $penjual_id);
     $stmt->execute();
     $produk = $stmt->get_result()->fetch_assoc();
-    
+
     if (!$produk) {
         die("<div class='min-h-screen flex items-center justify-center bg-gray-50'>
                 <div class='text-center p-8'>
@@ -39,11 +40,11 @@ if ($produk_id > 0 && $penjual_id > 0) {
                 </div>
             </div>");
     }
-    
+
     // Harga yang dipakai (diskon jika ada)
-    $harga_satuan = !empty($produk['harga_diskon']) && $produk['harga_diskon'] < $produk['harga_asli'] 
-                  ? $produk['harga_diskon'] 
-                  : $produk['harga_asli'];
+    $harga_satuan = !empty($produk['harga_diskon']) && $produk['harga_diskon'] < $produk['harga_asli']
+        ? $produk['harga_diskon']
+        : $produk['harga_asli'];
 } else {
     // Fallback jika tidak ada parameter
     header("Location: PromosiPage.php");
@@ -52,7 +53,8 @@ if ($produk_id > 0 && $penjual_id > 0) {
 
 // ========== FUNGSI HITUNG JARAK & ONGKIR ==========
 if (!function_exists('getJarak')) {
-    function getJarak($conn, $pos_asal, $pos_tujuan) {
+    function getJarak($conn, $pos_asal, $pos_tujuan)
+    {
         if ($pos_asal === 'HUB' || $pos_asal === $pos_tujuan) return 0;
         $stmt = $conn->prepare("SELECT jarak FROM matriks_jarak WHERE pos_asal = ? AND pos_tujuan = ?");
         $stmt->bind_param("ss", $pos_asal, $pos_tujuan);
@@ -63,36 +65,37 @@ if (!function_exists('getJarak')) {
 }
 
 if (!function_exists('hitungOngkirKonsolidasi')) {
-    function hitungOngkirKonsolidasi($conn, $seller_positions, $kode_pos_pembeli) {
+    function hitungOngkirKonsolidasi($conn, $seller_positions, $kode_pos_pembeli)
+    {
         if (empty($seller_positions)) return 12000;
-        
+
         // Urutkan penjual berdasarkan jarak dari Hub (terdekat dulu)
         $placeholders = implode(',', array_fill(0, count($seller_positions), '?'));
         $types = str_repeat('s', count($seller_positions));
-        
+
         $stmt = $conn->prepare("SELECT kode_pos, jarak_dari_hub FROM kode_pos WHERE kode_pos IN ($placeholders) ORDER BY jarak_dari_hub ASC");
         $stmt->bind_param($types, ...$seller_positions);
         $stmt->execute();
         $sellers_sorted = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-        
+
         if (empty($sellers_sorted)) return 12000; // fallback
-        
+
         $total_jarak = 0;
-        
+
         // 1. Hub → Penjual Terdekat
         $total_jarak += $sellers_sorted[0]['jarak_dari_hub'];
-        
+
         // 2. Penjual → Penjual (loop)
         for ($i = 0; $i < count($sellers_sorted) - 1; $i++) {
-            $jarak = getJarak($conn, $sellers_sorted[$i]['kode_pos'], $sellers_sorted[$i+1]['kode_pos']);
+            $jarak = getJarak($conn, $sellers_sorted[$i]['kode_pos'], $sellers_sorted[$i + 1]['kode_pos']);
             $total_jarak += $jarak;
         }
-        
+
         // 3. Penjual Terakhir → Pembeli
         $last_pos = end($sellers_sorted)['kode_pos'];
         $jarak_final = getJarak($conn, $last_pos, $kode_pos_pembeli);
         $total_jarak += $jarak_final;
-        
+
         return $total_jarak * 2000; // Tarif Rp 2.000/km
     }
 }
@@ -118,8 +121,8 @@ $alamat = '';
 $pembayaran = 'Transfer Bank';
 
 $kode_pos_pembeli = $user_data['kode_pos'] ?? $_SESSION['kode_pos'] ?? '';
-$ongkir_konsolidasi = hitungOngkirKonsolidasi($conn, [$produk['penjual_kode_pos']], $kode_pos_pembeli);
-$ongkir = $ongkir_konsolidasi;
+$ongkir_foodsave = hitungOngkirKonsolidasi($conn, [$produk['penjual_kode_pos']], $kode_pos_pembeli);
+$ongkir = $ongkir_foodsave;
 
 // 🔄 HANDLE FORM SUBMIT
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -129,11 +132,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $alamat = trim($_POST['alamat'] ?? '');
     $kode_voucher = strtoupper(trim($_POST['voucher'] ?? ''));
     $pembayaran = $_POST['pembayaran'] ?? 'Transfer Bank';
-    $ongkir = isset($_POST['pengiriman']) ? (int)$_POST['pengiriman'] : $ongkir_konsolidasi;
-    
+    $ongkir = isset($_POST['pengiriman']) ? (int)$_POST['pengiriman'] : $ongkir_foodsave;
+
     // Hitung total
     $harga_produk = $harga_satuan * $jumlah_produk;
-    
+
     // Voucher logic
     if ($kode_voucher === 'FOODSAVE10') {
         $diskon = min(10000, $harga_produk * 0.1); // Max 10% atau 10k
@@ -142,9 +145,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $diskon = 0;
     }
-    
+
     $total_bayar = $harga_produk + $biaya_layanan + $ongkir - $diskon;
-    
+
     if (isset($_POST['apply_voucher'])) {
         if ($kode_voucher === 'FOODSAVE10') {
             $pesan = '🎉 Voucher FOODSAVE10 berhasil diterapkan! Diskon 10% (Maks Rp 10.000)';
@@ -167,35 +170,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             // ✅ INSERT KE DATABASE
             $stmt = $conn->prepare("
-                INSERT INTO transaksi 
-                (user_id, penjual_id, produk_id, jumlah, total_harga, status, alamat_pengiriman, no_telepon, metode_pembayaran, ongkir, diskon, kode_voucher, checkout_batch_id, shipping_status) 
-                VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, 'diproses')
-            ");
-            
+    INSERT INTO transaksi 
+    (user_id, penjual_id, produk_id, jumlah, total_harga, status, alamat_pengiriman, no_telepon, metode_pembayaran, ongkir, diskon, kode_voucher, checkout_batch_id, shipping_status) 
+    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, 'diproses')
+");
+
             $batch_id = 'BATCH_SINGLE_' . date('YmdHis') . '_' . $user_id;
-            
-            $stmt->bind_param("iiidssssddsss", 
-                $user_id, 
-                $penjual_id, 
-                $produk_id, 
-                $jumlah_produk, 
-                $total_bayar,
-                $alamat,
-                $telepon,
-                $pembayaran,
-                $ongkir,
-                $diskon,
-                $kode_voucher,
-                $batch_id
+
+            // Type string: iiid s s s s d d s s
+            //              3i  1d 4s 2d 2s = 12 parameter
+            $stmt->bind_param(
+                "iiidssssddss",
+                $user_id,           // i - integer
+                $penjual_id,        // i - integer
+                $produk_id,         // i - integer
+                $jumlah_produk,     // d - double/integer
+                $total_bayar,       // s - string
+                $alamat,            // s - string
+                $telepon,           // s - string
+                $pembayaran,        // s - string
+                $ongkir,            // d - double
+                $diskon,            // d - double
+                $kode_voucher,      // s - string
+                $batch_id           // s - string
             );
-            
+
             if ($stmt->execute()) {
                 // Kurangi stok produk
                 $stmt_update = $conn->prepare("UPDATE produk SET stok = stok - ? WHERE id = ?");
                 $stmt_update->bind_param("ii", $jumlah_produk, $produk_id);
                 $stmt_update->execute();
-                
-                header("Location: payment_summary.php?batch_id=$batch_id&total=$total_bayar&pembayaran=" . urlencode($pembayaran));
+
+                header("Location: payment_upload.php?batch_id=$batch_id&total=$total_bayar&pembayaran=" . urlencode($pembayaran));
                 exit;
             } else {
                 $pesan = '❌ Gagal memproses pesanan: ' . mysqli_error($conn);
@@ -211,6 +217,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 ?>
 <!DOCTYPE html>
 <html lang="id">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -220,6 +227,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .input-focus { @apply focus:ring-2 focus:ring-brand focus:border-brand outline-none transition; }
     </style>
 </head>
+
 <body class="bg-gray-50 text-gray-800 min-h-screen">
 
     <!-- NAVBAR (Sama dengan index.php) -->
@@ -236,7 +244,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <!-- MAIN CONTENT -->
     <main class="max-w-5xl mx-auto px-4 py-8">
-        
+
         <!-- Header -->
         <div class="text-center mb-8">
             <h1 class="text-3xl font-bold text-gray-900">Checkout</h1>
@@ -245,31 +253,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <!-- Alert Message -->
         <?php if ($pesan): ?>
-            <div class="mb-6 p-4 rounded-xl border-2 <?= $pesan_class === 'success' 
-                ? 'bg-green-50 border-green-200 text-green-700' 
-                : 'bg-red-50 border-red-200 text-red-700' ?>">
+            <div class="mb-6 p-4 rounded-xl border-2 <?= $pesan_class === 'success'
+                                                            ? 'bg-green-50 border-green-200 text-green-700'
+                                                            : 'bg-red-50 border-red-200 text-red-700' ?>">
                 <?= $pesan ?>
             </div>
         <?php endif; ?>
 
         <!-- Checkout Grid -->
         <div class="grid lg:grid-cols-3 gap-6">
-            
+
             <!-- FORM KIRI (2/3) -->
             <div class="lg:col-span-2 space-y-6">
-                
+
                 <!-- Ringkasan Produk -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                     <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
                         <span class="w-8 h-8 bg-brand/10 rounded-lg flex items-center justify-center text-brand">📦</span>
                         Produk yang Dibeli
                     </h2>
-                    
+
                     <div class="flex gap-4 p-4 bg-gray-50 rounded-lg">
                         <?php if ($produk['gambar_url']): ?>
-                            <img src="<?= htmlspecialchars($produk['gambar_url']) ?>" 
-                                 alt="<?= htmlspecialchars($produk['nama_produk']) ?>" 
-                                 class="w-20 h-20 rounded-lg object-cover bg-white">
+                            <img src="<?= htmlspecialchars($produk['gambar_url']) ?>"
+                                alt="<?= htmlspecialchars($produk['nama_produk']) ?>"
+                                class="w-20 h-20 rounded-lg object-cover bg-white">
                         <?php else: ?>
                             <div class="w-20 h-20 rounded-lg bg-gray-200 flex items-center justify-center text-2xl">📷</div>
                         <?php endif; ?>
@@ -281,25 +289,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <?php if ($produk['harga_diskon'] && $produk['harga_diskon'] < $produk['harga_asli']): ?>
                                     <span class="text-sm text-gray-400 line-through"><?= formatRupiah($produk['harga_asli']) ?></span>
                                     <span class="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">
-                                        -<?= round((1 - $produk['harga_diskon']/$produk['harga_asli'])*100) ?>%
+                                        -<?= round((1 - $produk['harga_diskon'] / $produk['harga_asli']) * 100) ?>%
                                     </span>
                                 <?php endif; ?>
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Qty Selector -->
                     <div class="mt-4 flex items-center gap-3">
                         <label class="text-sm font-medium text-gray-700">Jumlah:</label>
                         <div class="flex items-center border border-gray-300 rounded-lg">
-                            <button type="button" onclick="updateQty(-1)" 
-                                    class="px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-l-lg disabled:opacity-50"
-                                    <?= $jumlah_produk <= 1 ? 'disabled' : '' ?>>−</button>
+                            <button type="button" onclick="updateQty(-1)"
+                                class="px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-l-lg disabled:opacity-50"
+                                <?= $jumlah_produk <= 1 ? 'disabled' : '' ?>>−</button>
                             <input type="number" name="jumlah_produk" value="<?= $jumlah_produk ?>" min="1" max="<?= $produk['stok'] ?>"
-                                   class="w-16 text-center border-0 focus:ring-0 text-sm font-medium" readonly>
-                            <button type="button" onclick="updateQty(1)" 
-                                    class="px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-r-lg disabled:opacity-50"
-                                    <?= $jumlah_produk >= $produk['stok'] ? 'disabled' : '' ?>>+</button>
+                                class="w-16 text-center border-0 focus:ring-0 text-sm font-medium" readonly>
+                            <button type="button" onclick="updateQty(1)"
+                                class="px-3 py-2 text-gray-600 hover:bg-gray-100 rounded-r-lg disabled:opacity-50"
+                                <?= $jumlah_produk >= $produk['stok'] ? 'disabled' : '' ?>>+</button>
                         </div>
                         <span class="text-sm text-gray-500">Stok tersedia: <?= $produk['stok'] ?> <?= htmlspecialchars($produk['satuan']) ?></span>
                     </div>
@@ -311,34 +319,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <input type="hidden" name="penjual_id" value="<?= $penjual_id ?>">
                     <input type="hidden" name="harga_satuan" value="<?= $harga_satuan ?>">
                     <input type="hidden" name="jumlah_produk" id="hidden_jumlah_produk" value="<?= $jumlah_produk ?>">
-                    
+
                     <!-- Data Pembeli -->
                     <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                         <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
                             <span class="w-8 h-8 bg-brand/10 rounded-lg flex items-center justify-center text-brand">👤</span>
                             Data Pembeli
                         </h2>
-                        
+
                         <div class="space-y-4">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Nama Lengkap *</label>
                                 <input type="text" name="nama" value="<?= htmlspecialchars($nama) ?>"
-                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg input-focus"
-                                       placeholder="Nama sesuai KTP">
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg input-focus"
+                                    placeholder="Nama sesuai KTP">
                             </div>
-                            
+
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Nomor WhatsApp *</label>
                                 <input type="tel" name="telepon" value="<?= htmlspecialchars($telepon) ?>"
-                                       class="w-full px-4 py-3 border border-gray-300 rounded-lg input-focus"
-                                       placeholder="08xxxxxxxxxx">
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg input-focus"
+                                    placeholder="08xxxxxxxxxx">
                             </div>
-                            
+
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Alamat Pengiriman *</label>
                                 <textarea name="alamat" rows="3"
-                                          class="w-full px-4 py-3 border border-gray-300 rounded-lg input-focus resize-none"
-                                          placeholder="Jl. Contoh No. 123, RT/RW, Kelurahan, Kecamatan, Kota"><?= htmlspecialchars($alamat) ?></textarea>
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg input-focus resize-none"
+                                    placeholder="Jl. Contoh No. 123, RT/RW, Kelurahan, Kecamatan, Kota"><?= htmlspecialchars($alamat) ?></textarea>
                             </div>
                         </div>
                     </div>
@@ -349,30 +357,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <span class="w-8 h-8 bg-brand/10 rounded-lg flex items-center justify-center text-brand">🚚</span>
                             Metode Pengiriman
                         </h2>
-                        
+
                         <div class="space-y-3">
-                            <label class="flex items-center gap-3 p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand transition <?= $ongkir === $ongkir_konsolidasi ? 'border-brand bg-brand/5' : '' ?>">
-                                <input type="radio" name="pengiriman" value="<?= $ongkir_konsolidasi ?>" class="w-4 h-4 text-brand" <?= $ongkir === $ongkir_konsolidasi ? 'checked' : '' ?> onchange="hitungTotal()">
+                            <label class="flex items-center gap-3 p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand transition <?= $ongkir === $ongkir_foodsave ? 'border-brand bg-brand/5' : '' ?>">
+                                <input type="radio" name="pengiriman" value="<?= $ongkir_foodsave ?>" class="w-4 h-4 text-brand" <?= $ongkir === $ongkir_foodsave ? 'checked' : '' ?> onchange="hitungTotal()">
                                 <div class="flex-1">
-                                    <span class="font-medium text-gray-900">Kurir Instan Rute Teroptimasi</span>
-                                    <p class="text-sm text-gray-500">Estimasi 1-3 jam • Berdasarkan kode pos</p>
+                                    <span class="font-medium text-gray-900">🌿 FoodSave Delivery</span>
+                                    <p class="text-sm text-gray-500">Estimasi 1-3 jam • Rute teroptimasi & ramah lingkungan</p>
                                 </div>
-                                <span class="font-semibold text-brand"><?= formatRupiah($ongkir_konsolidasi) ?></span>
+                                <span class="font-semibold text-brand"><?= formatRupiah($ongkir_foodsave) ?></span>
                             </label>
-                            
-                            <label class="flex items-center gap-3 p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand transition <?= $ongkir === 8000 ? 'border-brand bg-brand/5' : '' ?>">
-                                <input type="radio" name="pengiriman" value="8000" class="w-4 h-4 text-brand" <?= $ongkir === 8000 ? 'checked' : '' ?> onchange="hitungTotal()">
-                                <div class="flex-1">
-                                    <span class="font-medium text-gray-900">Same Day Delivery</span>
-                                    <p class="text-sm text-gray-500">Tiba sebelum 21:00 • Area Jabodetabek</p>
-                                </div>
-                                <span class="font-semibold text-brand"><?= formatRupiah(8000) ?></span>
-                            </label>
-                            
+
                             <label class="flex items-center gap-3 p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand transition <?= $ongkir === 0 ? 'border-brand bg-brand/5' : '' ?>">
                                 <input type="radio" name="pengiriman" value="0" class="w-4 h-4 text-brand" <?= $ongkir === 0 ? 'checked' : '' ?> onchange="hitungTotal()">
                                 <div class="flex-1">
-                                    <span class="font-medium text-gray-900">Ambil Sendiri di Toko</span>
+                                    <span class="font-medium text-gray-900">🏪 Ambil Sendiri di Toko</span>
                                     <p class="text-sm text-gray-500">Gratis • <?= htmlspecialchars($produk['nama_toko']) ?></p>
                                 </div>
                                 <span class="font-semibold text-green-600">Gratis</span>
@@ -386,17 +385,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <span class="w-8 h-8 bg-brand/10 rounded-lg flex items-center justify-center text-brand">💳</span>
                             Metode Pembayaran
                         </h2>
-                        
+
                         <div class="grid grid-cols-2 gap-3">
-                            <?php $methods = ['Transfer Bank' => '🏦 BCA/Mandiri/BRI', 'E-Wallet' => '📱 GoPay/OVO/Dana', 'COD' => '💵 Bayar di Tempat']; ?>
-                            <?php foreach ($methods as $val => $desc): ?>
-                            <label class="p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand transition text-center <?= $pembayaran === $val ? 'border-brand bg-brand/5' : '' ?>">
-                                <input type="radio" name="pembayaran" value="<?= $val ?>" class="sr-only" <?= $pembayaran === $val ? 'checked' : '' ?>>
-                                <div class="text-2xl mb-1"><?= explode(' ', $desc)[0] ?></div>
-                                <div class="text-sm font-medium text-gray-900"><?= $val ?></div>
-                                <div class="text-xs text-gray-500"><?= implode(' ', array_slice(explode(' ', $desc), 1)) ?></div>
+                            <label class="p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand transition text-center <?= $pembayaran === 'Transfer Bank' ? 'border-brand bg-brand/5' : '' ?>">
+                                <input type="radio" name="pembayaran" value="Transfer Bank" class="sr-only" <?= $pembayaran === 'Transfer Bank' ? 'checked' : '' ?>>
+                                <div class="text-2xl mb-1">🏦</div>
+                                <div class="text-sm font-medium text-gray-900">Transfer Bank</div>
+                                <div class="text-xs text-gray-500">BCA / Mandiri / BRI</div>
                             </label>
-                            <?php endforeach; ?>
+
+                            <label class="p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand transition text-center <?= $pembayaran === 'QRIS' ? 'border-brand bg-brand/5' : '' ?>">
+                                <input type="radio" name="pembayaran" value="QRIS" class="sr-only" <?= $pembayaran === 'QRIS' ? 'checked' : '' ?>>
+                                <div class="text-2xl mb-1">📱</div>
+                                <div class="text-sm font-medium text-gray-900">QRIS</div>
+                                <div class="text-xs text-gray-500">Scan & Bayar Instan</div>
+                            </label>
                         </div>
                     </div>
 
@@ -406,7 +409,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <span class="w-8 h-8 bg-brand/10 rounded-lg flex items-center justify-center text-brand">🎁</span>
                             Kode Voucher
                         </h2>
-                        
+
                         <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
                             <p class="text-sm text-yellow-800">
                                 <strong>Voucher tersedia:</strong><br>
@@ -414,12 +417,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <code class="bg-white px-2 py-0.5 rounded">FOODSAVE20</code> = Diskon <?= formatRupiah(20000) ?>
                             </p>
                         </div>
-                        
+
                         <div class="flex gap-2">
                             <input type="text" name="voucher" value="<?= htmlspecialchars($kode_voucher) ?>" placeholder="Masukkan kode voucher"
-                                   class="flex-1 px-4 py-3 border border-gray-300 rounded-lg input-focus uppercase">
+                                class="flex-1 px-4 py-3 border border-gray-300 rounded-lg input-focus uppercase">
                             <button type="submit" name="apply_voucher"
-                                    class="px-6 py-3 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition">
+                                class="px-6 py-3 bg-gray-100 text-gray-700 font-medium rounded-lg hover:bg-gray-200 transition">
                                 Terapkan
                             </button>
                         </div>
@@ -427,10 +430,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     <!-- Submit Button -->
                     <button type="submit" name="bayar_sekarang"
-                            class="w-full py-4 bg-brand hover:bg-brand-dark text-white font-semibold rounded-xl transition shadow-lg hover:shadow-xl text-lg cursor-pointer">
+                        class="w-full py-4 bg-brand hover:bg-brand-dark text-white font-semibold rounded-xl transition shadow-lg hover:shadow-xl text-lg cursor-pointer">
                         Bayar Sekarang • <span id="btnTotal"><?= formatRupiah($total_bayar) ?></span>
                     </button>
-                    
+
                     <p class="text-center text-sm text-gray-500">
                         🔒 Data kamu aman dan terenkripsi
                     </p>
@@ -441,7 +444,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="lg:col-span-1">
                 <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 sticky top-24">
                     <h2 class="text-lg font-semibold text-gray-900 mb-4">Ringkasan Pesanan</h2>
-                    
+
                     <div class="space-y-3 text-sm">
                         <div class="flex justify-between">
                             <span class="text-gray-500">Produk</span>
@@ -468,13 +471,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <span id="diskonDisplay">- <?= formatRupiah($diskon) ?></span>
                         </div>
                     </div>
-                    
+
                     <div class="flex justify-between text-lg font-bold text-gray-900 pt-4 mt-4 border-t-2 border-brand">
                         <span>Total Bayar</span>
                         <span id="totalDisplay"><?= formatRupiah($total_bayar) ?></span>
                     </div>
-                    
-                    <!-- Progress Bar (opsional) -->
+
+                    <!-- Progress Bar -->
                     <div class="mt-6 pt-4 border-t">
                         <div class="flex items-center justify-between text-xs text-gray-500 mb-2">
                             <span>Proses Pesanan</span>
@@ -507,7 +510,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         const biayaLayanan = <?= $biaya_layanan ?>;
         let diskon = <?= $diskon ?>;
         const stokMaks = <?= $produk['stok'] ?>;
-        
+
         // Update qty
         function updateQty(delta) {
             const input = document.querySelector('input[name="jumlah_produk"]');
@@ -515,26 +518,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (val < 1) val = 1;
             if (val > stokMaks) val = stokMaks;
             input.value = val;
-            
+
             // Set hidden field value
             const hiddenInput = document.getElementById('hidden_jumlah_produk');
             if (hiddenInput) hiddenInput.value = val;
-            
+
             hitungTotal();
-            
+
             // Update button states
             document.querySelectorAll('button[onclick*="updateQty"]')[0].disabled = val <= 1;
             document.querySelectorAll('button[onclick*="updateQty"]')[1].disabled = val >= stokMaks;
         }
-        
+
         // Hitung total realtime
         function hitungTotal() {
             const qty = parseInt(document.querySelector('input[name="jumlah_produk"]').value);
             const ongkir = parseInt(document.querySelector('input[name="pengiriman"]:checked').value);
-            
+
             const subtotal = hargaSatuan * qty;
             const total = subtotal + biayaLayanan + ongkir - diskon;
-            
+
             // Update display
             document.getElementById('subtotalDisplay').textContent = formatRupiah(subtotal);
             document.getElementById('ongkirDisplay').textContent = ongkir === 0 ? 'Gratis' : formatRupiah(ongkir);
@@ -542,15 +545,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             document.getElementById('totalDisplay').textContent = formatRupiah(total);
             document.getElementById('btnTotal').textContent = formatRupiah(total);
         }
-        
+
         // Format Rupiah
         function formatRupiah(angka) {
             return "Rp " + angka.toLocaleString("id-ID");
         }
-        
+
         // Auto hitung saat load
         document.addEventListener('DOMContentLoaded', hitungTotal);
-        
+
         // Auto select radio styling
         document.querySelectorAll('input[type="radio"][name="pengiriman"], input[type="radio"][name="pembayaran"]').forEach(radio => {
             radio.addEventListener('change', function() {
@@ -565,4 +568,5 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </script>
 
 </body>
+
 </html>
