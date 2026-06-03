@@ -1,7 +1,8 @@
 <?php
 // tambah_ke_keranjang.php
 session_start();
-include 'koneksi.php';
+require_once 'config/database.php';
+require_once 'includes/session_check.php';
 header('Content-Type: application/json');
 
 // Allow CORS if needed (for development)

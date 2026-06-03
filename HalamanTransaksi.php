@@ -1,6 +1,9 @@
 <?php
 session_start();
-include 'koneksi.php';
+require_once 'config/database.php';
+require_once 'includes/session_check.php';
+require_once 'includes/functions.php';
+require_once 'includes/ongkir_calculator.php';
 
 // 🔐 SECURITY: Harus login
 if (!isset($_SESSION['sudah_login']) || $_SESSION['sudah_login'] !== true) {
@@ -8,13 +11,7 @@ if (!isset($_SESSION['sudah_login']) || $_SESSION['sudah_login'] !== true) {
     exit;
 }
 
-// Format Rupiah helper
-function formatRupiah($angka)
-{
-    return "Rp " . number_format($angka, 0, ',', '.');
-}
-
-// 📦 Ambil data produk dari database
+// ==================== AMBIL DATA PRODUK ====================
 $produk_id = isset($_GET['produk_id']) ? (int)$_GET['produk_id'] : 0;
 $penjual_id = isset($_GET['penjual_id']) ? (int)$_GET['penjual_id'] : 0;
 
@@ -46,61 +43,11 @@ if ($produk_id > 0 && $penjual_id > 0) {
         ? $produk['harga_diskon']
         : $produk['harga_asli'];
 } else {
-    // Fallback jika tidak ada parameter
     header("Location: PromosiPage.php");
     exit;
 }
 
-// ========== FUNGSI HITUNG JARAK & ONGKIR ==========
-if (!function_exists('getJarak')) {
-    function getJarak($conn, $pos_asal, $pos_tujuan)
-    {
-        if ($pos_asal === 'HUB' || $pos_asal === $pos_tujuan) return 0;
-        $stmt = $conn->prepare("SELECT jarak FROM matriks_jarak WHERE pos_asal = ? AND pos_tujuan = ?");
-        $stmt->bind_param("ss", $pos_asal, $pos_tujuan);
-        $stmt->execute();
-        $res = $stmt->get_result()->fetch_assoc();
-        return $res ? (float)$res['jarak'] : 5; // fallback 5km
-    }
-}
-
-if (!function_exists('hitungOngkirKonsolidasi')) {
-    function hitungOngkirKonsolidasi($conn, $seller_positions, $kode_pos_pembeli)
-    {
-        if (empty($seller_positions)) return 12000;
-
-        // Urutkan penjual berdasarkan jarak dari Hub (terdekat dulu)
-        $placeholders = implode(',', array_fill(0, count($seller_positions), '?'));
-        $types = str_repeat('s', count($seller_positions));
-
-        $stmt = $conn->prepare("SELECT kode_pos, jarak_dari_hub FROM kode_pos WHERE kode_pos IN ($placeholders) ORDER BY jarak_dari_hub ASC");
-        $stmt->bind_param($types, ...$seller_positions);
-        $stmt->execute();
-        $sellers_sorted = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-
-        if (empty($sellers_sorted)) return 12000; // fallback
-
-        $total_jarak = 0;
-
-        // 1. Hub → Penjual Terdekat
-        $total_jarak += $sellers_sorted[0]['jarak_dari_hub'];
-
-        // 2. Penjual → Penjual (loop)
-        for ($i = 0; $i < count($sellers_sorted) - 1; $i++) {
-            $jarak = getJarak($conn, $sellers_sorted[$i]['kode_pos'], $sellers_sorted[$i + 1]['kode_pos']);
-            $total_jarak += $jarak;
-        }
-
-        // 3. Penjual Terakhir → Pembeli
-        $last_pos = end($sellers_sorted)['kode_pos'];
-        $jarak_final = getJarak($conn, $last_pos, $kode_pos_pembeli);
-        $total_jarak += $jarak_final;
-
-        return $total_jarak * 2000; // Tarif Rp 2.000/km
-    }
-}
-
-// Default values
+// ==================== DEFAULT VALUES ====================
 $jumlah_produk = 1;
 $biaya_layanan = 2000;
 $diskon = 0;
@@ -108,7 +55,7 @@ $kode_voucher = '';
 $pesan = '';
 $pesan_class = '';
 
-// Data pembeli (dari session jika ada)
+// ==================== DATA PEMBELI ====================
 $user_id = $_SESSION['user_id'];
 $stmt = $conn->prepare("SELECT nama_lengkap, email, kode_pos FROM users WHERE id = ?");
 $stmt->bind_param("i", $user_id);
@@ -124,7 +71,7 @@ $kode_pos_pembeli = $user_data['kode_pos'] ?? $_SESSION['kode_pos'] ?? '';
 $ongkir_foodsave = hitungOngkirKonsolidasi($conn, [$produk['penjual_kode_pos']], $kode_pos_pembeli);
 $ongkir = $ongkir_foodsave;
 
-// 🔄 HANDLE FORM SUBMIT
+// ==================== HANDLE FORM SUBMIT ====================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $jumlah_produk = max(1, (int)($_POST['jumlah_produk'] ?? 1));
     $nama = trim($_POST['nama'] ?? '');
@@ -137,26 +84,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Hitung total
     $harga_produk = $harga_satuan * $jumlah_produk;
 
-    // Voucher logic
-    if ($kode_voucher === 'FOODSAVE10') {
-        $diskon = min(10000, $harga_produk * 0.1); // Max 10% atau 10k
-    } elseif ($kode_voucher === 'FOODSAVE20') {
-        $diskon = min(20000, $harga_produk * 0.2); // Max 20% atau 20k
-    } else {
-        $diskon = 0;
-    }
-
+    // Voucher logic (pakai helper function)
+    $voucher_result = hitungDiskonVoucher($kode_voucher, $harga_produk);
+    $diskon = $voucher_result['diskon'];
+    
     $total_bayar = $harga_produk + $biaya_layanan + $ongkir - $diskon;
 
     if (isset($_POST['apply_voucher'])) {
-        if ($kode_voucher === 'FOODSAVE10') {
-            $pesan = '🎉 Voucher FOODSAVE10 berhasil diterapkan! Diskon 10% (Maks Rp 10.000)';
-            $pesan_class = 'success';
-        } elseif ($kode_voucher === 'FOODSAVE20') {
-            $pesan = '🎉 Voucher FOODSAVE20 berhasil diterapkan! Diskon 20% (Maks Rp 20.000)';
+        if ($voucher_result['valid']) {
+            $pesan = $voucher_result['pesan'];
             $pesan_class = 'success';
         } elseif (!empty($kode_voucher)) {
-            $pesan = '❌ Kode voucher tidak valid!';
+            $pesan = $voucher_result['pesan'];
             $pesan_class = 'error';
         }
     } else {
@@ -170,29 +109,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             // ✅ INSERT KE DATABASE
             $stmt = $conn->prepare("
-    INSERT INTO transaksi 
-    (user_id, penjual_id, produk_id, jumlah, total_harga, status, alamat_pengiriman, no_telepon, metode_pembayaran, ongkir, diskon, kode_voucher, checkout_batch_id, shipping_status) 
-    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, 'diproses')
-");
+                INSERT INTO transaksi 
+                (user_id, penjual_id, produk_id, jumlah, total_harga, status, alamat_pengiriman, no_telepon, metode_pembayaran, ongkir, diskon, kode_voucher, checkout_batch_id, shipping_status) 
+                VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, 'diproses')
+            ");
 
-            $batch_id = 'BATCH_SINGLE_' . date('YmdHis') . '_' . $user_id;
+            $batch_id = generateBatchId($user_id);
 
-            // Type string: iiid s s s s d d s s
-            //              3i  1d 4s 2d 2s = 12 parameter
             $stmt->bind_param(
                 "iiidssssddss",
-                $user_id,           // i - integer
-                $penjual_id,        // i - integer
-                $produk_id,         // i - integer
-                $jumlah_produk,     // d - double/integer
-                $total_bayar,       // s - string
-                $alamat,            // s - string
-                $telepon,           // s - string
-                $pembayaran,        // s - string
-                $ongkir,            // d - double
-                $diskon,            // d - double
-                $kode_voucher,      // s - string
-                $batch_id           // s - string
+                $user_id,
+                $penjual_id,
+                $produk_id,
+                $jumlah_produk,
+                $total_bayar,
+                $alamat,
+                $telepon,
+                $pembayaran,
+                $ongkir,
+                $diskon,
+                $kode_voucher,
+                $batch_id
             );
 
             if ($stmt->execute()) {
@@ -230,7 +167,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 <body class="bg-gray-50 text-gray-800 min-h-screen">
 
-    <!-- NAVBAR (Sama dengan index.php) -->
+    <!-- NAVBAR -->
     <nav class="bg-white shadow-sm sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
             <a href="Index.php" class="font-bold text-xl text-brand flex items-center gap-2">
@@ -503,69 +440,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <p>© <?= date('Y') ?> FoodSave. All rights reserved.</p>
     </footer>
 
-    <!-- JAVASCRIPT -->
+    <!-- Inject data PHP ke JavaScript -->
     <script>
-        // Data dari PHP
         const hargaSatuan = <?= $harga_satuan ?>;
         const biayaLayanan = <?= $biaya_layanan ?>;
         let diskon = <?= $diskon ?>;
         const stokMaks = <?= $produk['stok'] ?>;
-
-        // Update qty
-        function updateQty(delta) {
-            const input = document.querySelector('input[name="jumlah_produk"]');
-            let val = parseInt(input.value) + delta;
-            if (val < 1) val = 1;
-            if (val > stokMaks) val = stokMaks;
-            input.value = val;
-
-            // Set hidden field value
-            const hiddenInput = document.getElementById('hidden_jumlah_produk');
-            if (hiddenInput) hiddenInput.value = val;
-
-            hitungTotal();
-
-            // Update button states
-            document.querySelectorAll('button[onclick*="updateQty"]')[0].disabled = val <= 1;
-            document.querySelectorAll('button[onclick*="updateQty"]')[1].disabled = val >= stokMaks;
-        }
-
-        // Hitung total realtime
-        function hitungTotal() {
-            const qty = parseInt(document.querySelector('input[name="jumlah_produk"]').value);
-            const ongkir = parseInt(document.querySelector('input[name="pengiriman"]:checked').value);
-
-            const subtotal = hargaSatuan * qty;
-            const total = subtotal + biayaLayanan + ongkir - diskon;
-
-            // Update display
-            document.getElementById('subtotalDisplay').textContent = formatRupiah(subtotal);
-            document.getElementById('ongkirDisplay').textContent = ongkir === 0 ? 'Gratis' : formatRupiah(ongkir);
-            document.getElementById('diskonDisplay').textContent = '- ' + formatRupiah(diskon);
-            document.getElementById('totalDisplay').textContent = formatRupiah(total);
-            document.getElementById('btnTotal').textContent = formatRupiah(total);
-        }
-
-        // Format Rupiah
-        function formatRupiah(angka) {
-            return "Rp " + angka.toLocaleString("id-ID");
-        }
-
-        // Auto hitung saat load
-        document.addEventListener('DOMContentLoaded', hitungTotal);
-
-        // Auto select radio styling
-        document.querySelectorAll('input[type="radio"][name="pengiriman"], input[type="radio"][name="pembayaran"]').forEach(radio => {
-            radio.addEventListener('change', function() {
-                // Remove active from siblings
-                this.closest('.grid')?.querySelectorAll('label').forEach(l => l.classList.remove('border-brand', 'bg-brand/5'));
-                this.closest('div.space-y-3')?.querySelectorAll('label').forEach(l => l.classList.remove('border-brand', 'bg-brand/5'));
-                // Add active to selected
-                this.closest('label').classList.add('border-brand', 'bg-brand/5');
-                if (this.name === 'pengiriman') hitungTotal();
-            });
-        });
     </script>
+    
+    <!-- Load JavaScript dari file terpisah -->
+    <script src="assets/js/checkout.js"></script>
 
 </body>
 

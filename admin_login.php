@@ -1,6 +1,7 @@
 <?php
 session_start();
-include 'koneksi.php';
+require_once 'config/database.php';
+require_once 'includes/session_check.php';
 
 // Jika sudah login, redirect ke dashboard
 if (isset($_SESSION['sudah_login']) && $_SESSION['role'] === 'admin') {

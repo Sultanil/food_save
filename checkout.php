@@ -1,7 +1,10 @@
 <?php
-// checkout.php
+// checkout.php - Checkout dari keranjang (multi-item)
 session_start();
-include 'koneksi.php';
+require_once 'config/database.php';
+require_once 'includes/session_check.php';
+require_once 'includes/functions.php';
+require_once 'includes/ongkir_calculator.php';
 
 // Security check
 if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'pembeli') {
@@ -9,10 +12,11 @@ if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'pembeli') {
     exit;
 }
 
+// ==================== AMBIL DATA USER ====================
 $user_id = $_SESSION['user_id'];
 $kode_pos_pembeli = $_SESSION['kode_pos'] ?? '';
 
-// Ambil payload dari POST
+// ==================== AMBIL PAYLOAD DARI POST ====================
 $cart_items_raw = $_POST['cart_items'] ?? '';
 $cart_items = json_decode($cart_items_raw, true);
 $subtotal = isset($_POST['subtotal']) ? (float)$_POST['subtotal'] : 0;
@@ -22,120 +26,26 @@ if (empty($cart_items)) {
     exit;
 }
 
-// ========== FUNGSI HITUNG JARAK, ONGKIR & BIAYA LAYANAN ==========
-
-function getJarak($conn, $pos_asal, $pos_tujuan)
-{
-    if ($pos_asal === 'HUB' || $pos_asal === $pos_tujuan) return 0;
-    $stmt = $conn->prepare("SELECT jarak FROM matriks_jarak WHERE pos_asal = ? AND pos_tujuan = ?");
-    $stmt->bind_param("ss", $pos_asal, $pos_tujuan);
-    $stmt->execute();
-    $res = $stmt->get_result()->fetch_assoc();
-    return $res ? (float)$res['jarak'] : 5; // fallback 5km
-}
-
-/**
- * Hitung ongkir + biaya layanan berdasarkan rute teroptimasi
- * @return array ['ongkir' => int, 'biaya_layanan' => int, 'total_jarak' => float, 'detail' => string]
- */
-function hitungBiayaKonsolidasi($conn, $seller_positions, $kode_pos_pembeli)
-{
-    if (empty($seller_positions)) {
-        return [
-            'ongkir' => 10000,
-            'biaya_layanan' => 2000,
-            'total_jarak' => 5,
-            'jumlah_penjual' => 0,
-            'detail' => 'Rute standar (fallback)'
-        ];
-    }
-
-    $placeholders = implode(',', array_fill(0, count($seller_positions), '?'));
-    $types = str_repeat('s', count($seller_positions));
-
-    $stmt = $conn->prepare("SELECT kode_pos, jarak_dari_hub FROM kode_pos WHERE kode_pos IN ($placeholders) ORDER BY jarak_dari_hub ASC");
-    $stmt->bind_param($types, ...$seller_positions);
-    $stmt->execute();
-    $sellers_sorted = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-
-    if (empty($sellers_sorted)) {
-        return [
-            'ongkir' => 10000,
-            'biaya_layanan' => 2000,
-            'total_jarak' => 5,
-            'jumlah_penjual' => 0,
-            'detail' => 'Rute fallback'
-        ];
-    }
-
-    $total_jarak = 0;
-    $rute_detail = [];
-
-    // 1. Hub → Penjual Terdekat
-    $first_seller = $sellers_sorted[0]['kode_pos'];
-    $jarak_hub_first = $sellers_sorted[0]['jarak_dari_hub'];
-    $total_jarak += $jarak_hub_first;
-    $rute_detail[] = "Hub → {$first_seller} ({$jarak_hub_first} km)";
-
-    // 2. Penjual → Penjual
-    for ($i = 0; $i < count($sellers_sorted) - 1; $i++) {
-        $pos_a = $sellers_sorted[$i]['kode_pos'];
-        $pos_b = $sellers_sorted[$i + 1]['kode_pos'];
-        $jarak = getJarak($conn, $pos_a, $pos_b);
-        $total_jarak += $jarak;
-        $rute_detail[] = "{$pos_a} → {$pos_b} ({$jarak} km)";
-    }
-
-    // 3. Penjual Terakhir → Pembeli
-    $last_pos = end($sellers_sorted)['kode_pos'];
-    $jarak_final = getJarak($conn, $last_pos, $kode_pos_pembeli);
-    $total_jarak += $jarak_final;
-    $rute_detail[] = "{$last_pos} → {$kode_pos_pembeli} ({$jarak_final} km)";
-
-    // Perhitungan biaya
-    $tarif_per_km = 2000;
-    $ongkir = $total_jarak * $tarif_per_km;
-
-    $base_layanan = 1500;
-    $fee_per_seller = 500;
-    $fee_per_5km = 200;
-
-    $jumlah_penjual = count($sellers_sorted);
-    $biaya_layanan = $base_layanan
-        + (($jumlah_penjual - 1) * $fee_per_seller)
-        + (floor($total_jarak / 5) * $fee_per_5km);
-
-    $biaya_layanan = min($biaya_layanan, 10000);
-
-    return [
-        'ongkir' => (int)round($ongkir),
-        'biaya_layanan' => (int)round($biaya_layanan),
-        'total_jarak' => round($total_jarak, 1),
-        'jumlah_penjual' => $jumlah_penjual,
-        'detail' => implode(' → ', $rute_detail)
-    ];
-}
-// ========== END FUNGSI ==========
-
-// Hitung ongkir konsolidasi (untuk FoodSave Delivery)
+// ==================== HITUNG ONGKIR KONSOLIDASI ====================
 $seller_positions = array_unique(array_filter(array_column($cart_items, 'penjual_kode_pos')));
 $hasil_konsolidasi = hitungBiayaKonsolidasi($conn, $seller_positions, $kode_pos_pembeli);
 $ongkir_konsolidasi = $hasil_konsolidasi['ongkir'];
-$biaya_layanan = $hasil_konsolidasi['biaya_layanan']; // ← Dinamis!
+$biaya_layanan = $hasil_konsolidasi['biaya_layanan'];
+
+// ==================== DEFAULT VALUES ====================
 $nama = $_SESSION['nama'] ?? '';
 $telepon = '';
 $alamat = '';
 $kode_voucher = '';
-$diskon = 0; // ✅ Default: NO DISCOUNT
+$diskon = 0;
 $pembayaran = 'Transfer Bank';
-$pengiriman = 'foodsave'; // ✅ Default: FoodSave Delivery
+$pengiriman = 'foodsave';
 $ongkir = $ongkir_konsolidasi;
 $pesan = '';
 $pesan_class = '';
 
-// Handle form submission
+// ==================== HANDLE FORM SUBMIT ====================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-
     // Ambil input user
     $nama = trim($_POST['nama'] ?? '');
     $telepon = trim($_POST['telepon'] ?? '');
@@ -143,33 +53,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $pembayaran = $_POST['pembayaran'] ?? 'Transfer Bank';
     $pengiriman = $_POST['pengiriman'] ?? 'foodsave';
 
-    // ✅ HITUNG ONGKIR BERDASARKAN PILIHAN PENGIRIMAN
+    // Hitung ongkir berdasarkan pilihan pengiriman
     if ($pengiriman === 'pickup') {
-        $ongkir = 0; // Pick Up = Gratis
+        $ongkir = 0;
     } else {
-        $ongkir = $ongkir_konsolidasi; // FoodSave Delivery = hitung via kode pos
+        $ongkir = $ongkir_konsolidasi;
     }
 
-    // ✅ VOUCHER LOGIC: Hanya terapkan jika kode valid
+    // Voucher logic (pakai helper function)
     $kode_voucher_input = strtoupper(trim($_POST['voucher'] ?? ''));
     if (!empty($kode_voucher_input)) {
-        if ($kode_voucher_input === 'FOODSAVE10') {
-            $diskon = min(10000, $subtotal * 0.1);
-            $kode_voucher = 'FOODSAVE10';
-        } elseif ($kode_voucher_input === 'FOODSAVE20') {
-            $diskon = min(20000, $subtotal * 0.2);
-            $kode_voucher = 'FOODSAVE20';
+        $voucher_result = hitungDiskonVoucher($kode_voucher_input, $subtotal);
+        
+        if ($voucher_result['valid']) {
+            $diskon = $voucher_result['diskon'];
+            $kode_voucher = $voucher_result['kode'];
         } else {
-            // ❌ Voucher tidak valid → diskon tetap 0
             $diskon = 0;
             $kode_voucher = '';
             if (!isset($_POST['bayar_sekarang'])) {
-                $pesan = '❌ Kode voucher tidak valid!';
+                $pesan = $voucher_result['pesan'];
                 $pesan_class = 'error';
             }
         }
     } else {
-        // ✅ Tidak ada voucher → diskon = 0 (PENTING!)
         $diskon = 0;
         $kode_voucher = '';
     }
@@ -177,32 +84,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Hitung total
     $total_bayar = $subtotal + $biaya_layanan + $ongkir - $diskon;
 
-    // Handle "Terapkan Voucher" button (tanpa checkout)
+    // Handle "Terapkan Voucher"
     if (isset($_POST['apply_voucher'])) {
         if (!empty($kode_voucher)) {
             $pesan = '🎉 Voucher ' . $kode_voucher . ' berhasil diterapkan!';
             $pesan_class = 'success';
         }
-        // Lanjut render halaman dengan nilai terbaru
     }
 
     // Handle "Bayar Sekarang"
     if (isset($_POST['bayar_sekarang'])) {
-
-        // Validasi data wajib
+        // Validasi
         if (empty($nama) || empty($telepon) || empty($alamat)) {
             $pesan = '⚠️ Mohon lengkapi Nama, Nomor WhatsApp, dan Alamat Pengiriman.';
             $pesan_class = 'error';
-        }
-        // Validasi kode pos untuk FoodSave Delivery
-        elseif ($pengiriman === 'foodsave' && empty($kode_pos_pembeli)) {
+        } elseif ($pengiriman === 'foodsave' && empty($kode_pos_pembeli)) {
             $pesan = '⚠️ Kode pos pembeli belum terdaftar. Silakan lengkapi profil Anda terlebih dahulu.';
             $pesan_class = 'error';
         } else {
             // Generate batch ID
-            $batch_id = 'BATCH_' . date('YmdHis') . '_' . $user_id;
+            $batch_id = generateBatchId($user_id);
 
-            // Mulai transaction untuk keamanan
+            // Mulai transaction
             $conn->begin_transaction();
 
             try {
@@ -239,7 +142,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $diskon_item,
                         $kode_voucher,
                         $batch_id,
-                        $pengiriman // 'foodsave' atau 'pickup'
+                        $pengiriman
                     );
 
                     $stmt->execute();
@@ -271,7 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// ✅ PASTIKAN total_bayar selalu dihitung dengan benar
+// Pastikan total_bayar selalu dihitung dengan benar
 $ongkir = ($pengiriman === 'pickup') ? 0 : $ongkir_konsolidasi;
 $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
 ?>
@@ -305,19 +208,10 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
             @apply w-4 h-4 text-green-600;
         }
 
-        /* Animasi highlight section */
         @keyframes highlight-section {
-            0% {
-                box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5);
-            }
-
-            50% {
-                box-shadow: 0 0 0 8px rgba(34, 197, 94, 0.2);
-            }
-
-            100% {
-                box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
-            }
+            0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5); }
+            50% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0.2); }
+            100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
         }
 
         .section-highlight {
@@ -369,7 +263,6 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
 
                     <div class="space-y-3">
                         <?php foreach ($cart_items as $item):
-                            // Fallback gambar yang lebih reliable
                             $gambar_url = !empty($item['gambar_url']) && file_exists($item['gambar_url'])
                                 ? $item['gambar_url']
                                 : 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80"%3E%3Crect fill="%23f3f4f6" width="80" height="80"/%3E%3Ctext fill="%239ca3af" font-family="sans-serif" font-size="14" x="50%25" y="50%25" text-anchor="middle" dy=".3em"%3E📦%3C/text%3E%3C/svg%3E';
@@ -394,7 +287,6 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
 
                 <!-- Form Checkout -->
                 <form method="POST" class="space-y-6" id="checkoutForm">
-                    <!-- Hidden Payload -->
                     <input type="hidden" name="cart_items" value='<?= htmlspecialchars(json_encode($cart_items), ENT_QUOTES) ?>'>
                     <input type="hidden" name="subtotal" value="<?= $subtotal ?>">
 
@@ -432,7 +324,7 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                         </div>
                     </div>
 
-                    <!-- ✅ METODE PENGIRIMAN -->
+                    <!-- Metode Pengiriman -->
                     <div id="section-shipping" class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                         <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
                             <span class="w-8 h-8 bg-green-500/10 rounded-lg flex items-center justify-center text-green-600">🚚</span>
@@ -440,14 +332,12 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                         </h2>
 
                         <div class="space-y-4">
-
-                            <!-- ✅ FoodSave Delivery - BOX TERPISAH -->
+                            <!-- FoodSave Delivery -->
                             <label class="relative block p-4 border-2 rounded-xl cursor-pointer transition-all duration-200 
                       <?= $pengiriman === 'foodsave'
                             ? 'border-green-500 bg-green-50/40 shadow-md shadow-green-500/10'
                             : 'border-gray-200 bg-white hover:border-green-300 hover:shadow-sm' ?>">
                                 <div class="flex items-start gap-4">
-                                    <!-- Radio Input -->
                                     <div class="flex-shrink-0 mt-1">
                                         <input type="radio" name="pengiriman" value="foodsave"
                                             class="w-5 h-5 text-green-600 border-gray-300 focus:ring-green-500"
@@ -455,14 +345,12 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                                             onchange="submitWithHash(this, '#section-shipping')">
                                     </div>
 
-                                    <!-- Icon & Info -->
                                     <div class="flex-1 min-w-0">
                                         <div class="flex items-center gap-2 mb-1">
                                             <span class="font-semibold text-gray-900">FoodSave Delivery</span>
                                         </div>
                                         <p class="text-sm text-gray-500 mb-2">Pengiriman teroptimasi via hub • Rute terdekat dari semua penjual</p>
 
-                                        <!-- Detail Rute (jika ada) -->
                                         <?php if (isset($hasil_konsolidasi) && $pengiriman === 'foodsave'): ?>
                                             <div class="text-xs text-gray-400 space-y-0.5 mb-2">
                                                 <p>📍 Total jarak: <strong class="text-gray-600"><?= $hasil_konsolidasi['total_jarak'] ?> km</strong></p>
@@ -476,7 +364,6 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                                         <?php endif; ?>
                                     </div>
 
-                                    <!-- Harga -->
                                     <div class="flex-shrink-0 text-right">
                                         <span class="block text-lg font-bold text-green-600">
                                             <?= empty($kode_pos_pembeli) ? '-' : 'Rp ' . number_format($ongkir_konsolidasi, 0, ',', '.') ?>
@@ -488,13 +375,12 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                                 </div>
                             </label>
 
-                            <!-- ✅ Ambil Sendiri (Pick Up) - BOX TERPISAH -->
+                            <!-- Pick Up -->
                             <label class="relative block p-4 border-2 rounded-xl cursor-pointer transition-all duration-200 
                       <?= $pengiriman === 'pickup'
                             ? 'border-blue-500 bg-blue-50/40 shadow-md shadow-blue-500/10'
                             : 'border-gray-200 bg-white hover:border-blue-300 hover:shadow-sm' ?>">
                                 <div class="flex items-start gap-4">
-                                    <!-- Radio Input -->
                                     <div class="flex-shrink-0 mt-1">
                                         <input type="radio" name="pengiriman" value="pickup"
                                             class="w-5 h-5 text-blue-600 border-gray-300 focus:ring-blue-500"
@@ -502,7 +388,6 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                                             onchange="submitWithHash(this, '#section-shipping')">
                                     </div>
 
-                                    <!-- Icon & Info -->
                                     <div class="flex-1 min-w-0">
                                         <div class="flex items-center gap-2 mb-1">
                                             <span class="font-semibold text-gray-900">Ambil Sendiri (Pick Up)</span>
@@ -513,19 +398,16 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                                         </p>
                                     </div>
 
-                                    <!-- Harga -->
                                     <div class="flex-shrink-0 text-right">
                                         <span class="block text-lg font-bold text-green-600">Gratis</span>
                                         <span class="text-xs text-gray-400">ongkir</span>
                                     </div>
                                 </div>
-
                             </label>
-
                         </div>
                     </div>
 
-                    <!-- ✅ METODE PEMBAYARAN -->
+                    <!-- Metode Pembayaran -->
                     <div id="section-payment" class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                         <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
                             <span class="w-8 h-8 bg-green-500/10 rounded-lg flex items-center justify-center text-green-600">💳</span>
@@ -533,8 +415,6 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                         </h2>
 
                         <div class="grid grid-cols-2 gap-3">
-
-                            <!-- Transfer Bank -->
                             <label class="radio-card flex-col items-center text-center <?= $pembayaran === 'Transfer Bank' ? 'selected' : '' ?>">
                                 <input type="radio" name="pembayaran" value="Transfer Bank" class="sr-only"
                                     <?= $pembayaran === 'Transfer Bank' ? 'checked' : '' ?>
@@ -544,7 +424,6 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                                 <span class="text-xs text-gray-500 mt-1">BCA, Mandiri, BRI, BNI</span>
                             </label>
 
-                            <!-- QRIS -->
                             <label class="radio-card flex-col items-center text-center <?= $pembayaran === 'QRIS' ? 'selected' : '' ?>">
                                 <input type="radio" name="pembayaran" value="QRIS" class="sr-only"
                                     <?= $pembayaran === 'QRIS' ? 'checked' : '' ?>
@@ -553,10 +432,8 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                                 <span class="font-semibold text-gray-900 text-sm">QRIS</span>
                                 <span class="text-xs text-gray-500 mt-1">Scan & bayar dengan e-wallet</span>
                             </label>
-
                         </div>
 
-                        <!-- Info Pembayaran -->
                         <div class="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
                             <p>💡 <strong>Catatan:</strong> Setelah checkout, Anda akan diarahkan ke halaman pembayaran dengan instruksi lengkap sesuai metode yang dipilih.</p>
                         </div>
@@ -643,7 +520,6 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                         <span>Rp <?= number_format($total_bayar, 0, ',', '.') ?></span>
                     </div>
 
-                    <!-- Progress Steps -->
                     <div class="mt-6 pt-4 border-t">
                         <div class="flex justify-between text-xs">
                             <span class="text-green-600 font-medium flex items-center gap-1">✓ Keranjang</span>
@@ -652,7 +528,6 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                         </div>
                     </div>
 
-                    <!-- Trust Badges -->
                     <div class="mt-6 pt-4 border-t space-y-2">
                         <div class="flex items-center gap-2 text-xs text-gray-500">
                             <span class="text-green-600">🔐</span> Pembayaran Aman & Terenkripsi
@@ -675,133 +550,9 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
         <p>© <?= date('Y') ?> FoodSave. All rights reserved.</p>
     </footer>
 
-    <!-- ✅ JAVASCRIPT: SOLUSI 1 - URL HASH + SMOOTH SCROLL -->
-    <script>
-        console.log('✅ Checkout page loaded');
-        console.log('Form element:', document.getElementById('checkoutForm'));
-        console.log('Submit button:', document.querySelector('button[name="bayar_sekarang"]'));
+    <!-- Load JavaScript dari file terpisah -->
+    <script src="assets/js/checkout_cart.js"></script>
 
-        // ✅ Fungsi submit form dengan hash URL (HANYA untuk radio button)
-        function submitWithHash(element, hash) {
-            console.log('🔄 submitWithHash called:', hash);
-            try {
-                sessionStorage.setItem('checkout_scroll_to', hash);
-                history.replaceState(null, null, hash);
-                element.closest('form').submit();
-            } catch (error) {
-                console.error('❌ Error in submitWithHash:', error);
-                element.closest('form').submit();
-            }
-        }
-
-        // ✅ Monitor form submission
-        document.addEventListener('DOMContentLoaded', function() {
-            const form = document.getElementById('checkoutForm');
-            const submitBtn = document.querySelector('button[name="bayar_sekarang"]');
-
-            if (form) {
-                console.log('✅ Form found');
-
-                form.addEventListener('submit', function(e) {
-                    console.log('📤 Form submit event triggered!');
-                    console.log('Form action:', this.action);
-                    console.log('Form method:', this.method);
-
-                    // Validasi manual
-                    const requiredFields = this.querySelectorAll('[required]');
-                    let isValid = true;
-                    let emptyFields = [];
-
-                    requiredFields.forEach(field => {
-                        if (!field.value.trim()) {
-                            isValid = false;
-                            emptyFields.push(field.name);
-                            field.style.borderColor = 'red';
-                            field.style.backgroundColor = '#fef2f2';
-                        } else {
-                            field.style.borderColor = '';
-                            field.style.backgroundColor = '';
-                        }
-                    });
-
-                    if (!isValid) {
-                        e.preventDefault();
-                        console.error('❌ Validation failed. Empty fields:', emptyFields);
-                        alert('⚠️ Mohon lengkapi field berikut:\n- ' + emptyFields.join('\n- '));
-
-                        // Scroll ke field pertama yang kosong
-                        const firstEmpty = document.querySelector('[name="' + emptyFields[0] + '"]');
-                        if (firstEmpty) {
-                            firstEmpty.scrollIntoView({
-                                behavior: 'smooth',
-                                block: 'center'
-                            });
-                            firstEmpty.focus();
-                        }
-                        return false;
-                    }
-
-                    console.log('✅ Validation passed!');
-
-                    // Show loading state
-                    if (submitBtn) {
-                        submitBtn.disabled = true;
-                        submitBtn.innerHTML = '<span class="animate-spin mr-2">⏳</span> Memproses...';
-                        submitBtn.classList.add('opacity-75', 'cursor-not-allowed');
-                    }
-                });
-            } else {
-                console.error('❌ Form not found!');
-            }
-
-            if (submitBtn) {
-                console.log('✅ Submit button found');
-                submitBtn.addEventListener('click', function(e) {
-                    console.log('🖱️ Submit button clicked!');
-                    console.log('Button disabled:', this.disabled);
-                });
-            } else {
-                console.error('❌ Submit button not found!');
-            }
-
-            // Restore scroll position
-            const scrollTarget = sessionStorage.getItem('checkout_scroll_to');
-            if (scrollTarget) {
-                console.log('📍 Restoring scroll to:', scrollTarget);
-                const element = document.querySelector(scrollTarget);
-                if (element) {
-                    setTimeout(() => {
-                        element.classList.add('section-highlight');
-                        const navbarHeight = 80;
-                        const elementPosition = element.getBoundingClientRect().top + window.pageYOffset;
-                        const offsetPosition = elementPosition - navbarHeight;
-                        window.scrollTo({
-                            top: offsetPosition,
-                            behavior: 'smooth'
-                        });
-                        setTimeout(() => element.classList.remove('section-highlight'), 1000);
-                    }, 100);
-                }
-                sessionStorage.removeItem('checkout_scroll_to');
-            }
-
-            // Radio button visual feedback
-            document.querySelectorAll('input[name="pengiriman"], input[name="pembayaran"]').forEach(input => {
-                input.addEventListener('change', function() {
-                    document.querySelectorAll('.radio-card').forEach(card => card.classList.remove('selected'));
-                    this.closest('.radio-card')?.classList.add('selected');
-                });
-            });
-        });
-
-        // Format phone number
-        document.querySelector('input[name="telepon"]')?.addEventListener('input', function(e) {
-            let value = e.target.value.replace(/\D/g, '');
-            if (value.startsWith('08') && value.length > 2) {
-                e.target.value = value;
-            }
-        });
-    </script>
 </body>
 
 </html>

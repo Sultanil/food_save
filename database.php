@@ -2,7 +2,7 @@
 $host = "localhost";
 $user = "root";
 $pass = "";
-$db   = "foodsave_db";
+$db   = "food_save";
 
 $koneksi = mysqli_connect($host, $user, $pass, $db);
 

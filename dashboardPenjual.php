@@ -1,6 +1,7 @@
 <?php
 session_start();
-include 'koneksi.php';
+require_once 'config/database.php';
+require_once 'includes/session_check.php';
 
 // 🔐 SECURITY CHECK
 if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'penjual') {
@@ -11,7 +12,7 @@ if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'penjual') {
 // Ambil user_id dari session
 $user_id = $_SESSION['user_id'] ?? 0;
 
-
+// ==================== AMBIL DATA PENJUAL ====================
 $stmt = $conn->prepare("SELECT id, nama_toko, status_verifikasi, alasan_penolakan FROM penjual WHERE user_id = ?");
 $stmt->bind_param("i", $user_id);
 $stmt->execute();
@@ -27,19 +28,18 @@ $penjual_id = $penjual['id'];
 $status_verifikasi = $penjual['status_verifikasi'] ?? 'pending';
 $alasan_penolakan = $penjual['alasan_penolakan'] ?? '';
 
-// 📦 QUERY PRODUK MILIK PENJUAL INI
+// ==================== AMBIL PRODUK PENJUAL ====================
 $stmt = $conn->prepare("SELECT id, nama_produk, harga_asli, harga_diskon, stok, satuan, gambar_url, status FROM produk WHERE penjual_id = ? ORDER BY created_at DESC");
 $stmt->bind_param("i", $penjual_id);
 $stmt->execute();
 $produk_list = $stmt->get_result();
 
-// Hitung statistik
+// ==================== HITUNG STATISTIK ====================
 $stmt_stats = $conn->prepare("SELECT COUNT(*) as total, SUM(stok) as total_stok FROM produk WHERE penjual_id = ?");
 $stmt_stats->bind_param("i", $penjual_id);
 $stmt_stats->execute();
 $stats = $stmt_stats->get_result()->fetch_assoc();
 ?>
-
 <!DOCTYPE html>
 <html lang="id">
 
@@ -54,24 +54,8 @@ $stats = $stmt_stats->get_result()->fetch_assoc();
 
     <div class="flex min-h-screen">
 
-        <!-- SIDEBAR -->
-        <aside class="w-64 bg-white shadow-lg hidden md:block">
-            <div class="p-6 border-b border-gray-200">
-                <h1 class="text-2xl font-bold text-green-600">🌿 FoodSave</h1>
-            </div>
-
-            <nav class="p-4 space-y-2">
-                <a href="dashboardPenjual.php" class="flex items-center gap-3 px-4 py-3 bg-green-500 text-white rounded-lg font-medium">
-                    <span>📊</span> Dashboard
-                </a>
-                <a href="pesanan.php" class="flex items-center gap-3 px-4 py-3 text-gray-600 hover:bg-gray-100 rounded-lg font-medium transition">
-                    <span>🛒</span> Pesanan
-                </a>
-                <a href="index.php" class="flex items-center gap-3 px-4 py-3 text-red-600 hover:bg-red-50 rounded-lg font-medium transition">
-                    <span>🚪</span> Logout
-                </a>
-            </nav>
-        </aside>
+        <!-- SIDEBAR (dari include) -->
+        <?php include 'includes/sidebar_penjual.php'; ?>
 
         <!-- MAIN CONTENT -->
         <main class="flex-1 p-6 md:p-8">
@@ -131,9 +115,17 @@ $stats = $stmt_stats->get_result()->fetch_assoc();
                     <div class="flex items-center justify-between">
                         <div>
                             <p class="text-sm text-gray-500 font-medium">Status Toko</p>
-                            <p class="text-lg font-semibold text-green-600 mt-2">✅ Aktif</p>
+                            <?php
+                            $status_label = [
+                                'disetujui' => ['✅ Disetujui', 'text-green-600'],
+                                'pending' => ['⏳ Menunggu', 'text-yellow-600'],
+                                'ditolak' => ['❌ Ditolak', 'text-red-600']
+                            ];
+                            $s = $status_label[$status_verifikasi] ?? ['❓ Tidak Diketahui', 'text-gray-600'];
+                            ?>
+                            <p class="text-lg font-semibold <?= $s[1] ?> mt-2"><?= $s[0] ?></p>
                         </div>
-                        <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center text-2xl">✓</div>
+                        <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center text-2xl">🏪</div>
                     </div>
                 </div>
             </div>
@@ -143,9 +135,9 @@ $stats = $stmt_stats->get_result()->fetch_assoc();
                 <div class="p-6 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <h3 class="font-semibold text-lg text-gray-900">Produk Saya</h3>
                     <?php if ($status_verifikasi === 'disetujui'): ?>
-                    <a href="tambah_produk.php" class="inline-flex items-center justify-center px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm font-medium transition cursor-pointer">
-                        <span class="mr-2">+</span> Tambah Produk
-                    </a>
+                        <a href="tambah_produk.php" class="inline-flex items-center justify-center px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm font-medium transition cursor-pointer">
+                            <span class="mr-2">+</span> Tambah Produk
+                        </a>
                     <?php endif; ?>
                 </div>
 
@@ -156,9 +148,9 @@ $stats = $stmt_stats->get_result()->fetch_assoc();
                         <h3 class="text-lg font-semibold text-gray-900 mb-2">Belum Ada Produk</h3>
                         <p class="text-gray-500 mb-6">Yuk tambah produk pertama Anda dan mulai berjualan!</p>
                         <?php if ($status_verifikasi === 'disetujui'): ?>
-                        <a href="tambah_produk.php" class="inline-block px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-medium transition">
-                            Tambah Produk Pertama
-                        </a>
+                            <a href="tambah_produk.php" class="inline-block px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 font-medium transition">
+                                Tambah Produk Pertama
+                            </a>
                         <?php endif; ?>
                     </div>
                 <?php else: ?>
@@ -176,9 +168,6 @@ $stats = $stmt_stats->get_result()->fetch_assoc();
                             </thead>
                             <tbody class="divide-y divide-gray-100">
                                 <?php while ($p = $produk_list->fetch_assoc()): ?>
-        
-                                        <!-- ... kode tabel ... -->
-                                    </tr>
                                     <tr class="hover:bg-gray-50 transition-colors">
                                         <td class="px-6 py-4">
                                             <div class="flex items-center gap-3">
@@ -227,7 +216,8 @@ $stats = $stmt_stats->get_result()->fetch_assoc();
                                                 ✏️ Edit
                                             </a>
                                             <a href="kelola_produk.php?id=<?= $p['id'] ?>&action=delete"
-                                                class="text-red-600 hover:text-red-800 text-sm font-medium">
+                                                class="text-red-600 hover:text-red-800 text-sm font-medium"
+                                                onclick="return confirm('Yakin ingin menghapus produk ini?')">
                                                 🗑️ Hapus
                                             </a>
                                         </td>

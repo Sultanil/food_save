@@ -1,6 +1,8 @@
 <?php
 session_start();
-include 'koneksi.php';
+require_once 'config/database.php';
+require_once 'includes/session_check.php';
+require_once 'includes/notifikasi_admin.php';
 
 // Security: Hanya admin yang bisa akses
 if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'admin') {
@@ -8,48 +10,13 @@ if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'admin') {
     exit;
 }
 
-// Proses soft delete
-if (isset($_GET['hapus'])) {
-    $id = (int)$_GET['hapus'];
-    // Jangan biarkan admin menghapus dirinya sendiri
-    if ($id != $_SESSION['user_id']) {
-        mysqli_query($conn, "UPDATE users SET is_deleted = 1, deleted_at = NOW() WHERE id = $id");
-        header("Location: dashboardAdmin.php?msg=deleted");
-        exit;
-    }
-}
-
-// Proses restore (aktifkan kembali)
-if (isset($_GET['restore'])) {
-    $id = (int)$_GET['restore'];
-    mysqli_query($conn, "UPDATE users SET is_deleted = 0, deleted_at = NULL WHERE id = $id");
-    header("Location: dashboardAdmin.php?msg=restored");
-    exit;
-}
-
-// Proses Setujui Penjual
-if (isset($_GET['setujui_penjual'])) {
-    $id = (int)$_GET['setujui_penjual'];
-    mysqli_query($conn, "UPDATE penjual SET status_verifikasi = 'disetujui', alasan_penolakan = NULL WHERE id = $id");
-    header("Location: dashboardAdmin.php?msg=approved");
-    exit;
-}
-
-// Proses Tolak Penjual
-if (isset($_POST['tolak_penjual'])) {
-    $id = (int)$_POST['penjual_id'];
-    $alasan = mysqli_real_escape_string($conn, $_POST['alasan_penolakan']);
-    mysqli_query($conn, "UPDATE penjual SET status_verifikasi = 'ditolak', alasan_penolakan = '$alasan' WHERE id = $id");
-    header("Location: dashboardAdmin.php?msg=rejected");
-    exit;
-}
-
-// Ambil statistik
+// ==================== AMBIL STATISTIK ====================
 $total_users = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) as total FROM users WHERE is_deleted = 0"))['total'];
 $total_penjual = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) as total FROM users WHERE role = 'penjual' AND is_deleted = 0"))['total'];
 $total_pembeli = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) as total FROM users WHERE role = 'pembeli' AND is_deleted = 0"))['total'];
 
-// Ambil list penjual pending
+// ==================== AMBIL DATA ====================
+// List penjual pending
 $pending_sellers = mysqli_query($conn, "
     SELECT p.*, u.nama_lengkap, u.email 
     FROM penjual p
@@ -58,13 +25,12 @@ $pending_sellers = mysqli_query($conn, "
     ORDER BY p.id DESC
 ");
 
-// Ambil list users (aktif)
+// List users aktif
 $users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 0 ORDER BY created_at DESC");
 
-// Ambil list users (deleted) untuk referensi
+// List users deleted
 $deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 ORDER BY deleted_at DESC");
 ?>
-
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -77,20 +43,15 @@ $deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 O
 </head>
 <body class="bg-gray-50">
 
-    <!-- Navbar -->
-    <nav class="bg-white shadow-sm border-b sticky top-0 z-40">
-        <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
-            <h1 class="text-xl font-bold text-green-600">🌿 Admin FoodSave</h1>
-            <div class="flex items-center gap-4">
-                <span class="text-sm text-gray-600">Halo, <?= htmlspecialchars($_SESSION['nama']) ?></span>
-                <a href="logout.php" class="text-sm text-red-600 hover:underline">Logout</a>
-            </div>
-        </div>
-    </nav>
+    <!-- Navbar (dari include) -->
+    <?php include 'includes/navbar_admin.php'; ?>
 
     <div class="max-w-7xl mx-auto px-4 py-8">
         
-        <!-- Statistik -->
+        <!-- Notifikasi (dari helper) -->
+        <?php tampilkanNotifikasi(); ?>
+
+        <!-- ==================== STATISTIK ==================== -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <div class="bg-white p-6 rounded-xl shadow-sm border">
                 <div class="text-sm text-gray-500">Total User Aktif</div>
@@ -106,28 +67,7 @@ $deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 O
             </div>
         </div>
 
-        <!-- Pesan Notifikasi -->
-        <?php if (isset($_GET['msg'])): ?>
-            <?php if ($_GET['msg'] == 'deleted'): ?>
-                <div class="bg-yellow-50 text-yellow-700 p-3.5 rounded-xl mb-6 border border-yellow-200 shadow-sm text-sm">
-                    ✅ User berhasil dinonaktifkan (soft delete)
-                </div>
-            <?php elseif ($_GET['msg'] == 'restored'): ?>
-                <div class="bg-green-50 text-green-700 p-3.5 rounded-xl mb-6 border border-green-200 shadow-sm text-sm">
-                    ✅ User berhasil diaktifkan kembali
-                </div>
-            <?php elseif ($_GET['msg'] == 'approved'): ?>
-                <div class="bg-green-50 text-green-700 p-3.5 rounded-xl mb-6 border border-green-200 shadow-sm text-sm">
-                    ✅ Pendaftaran toko penjual berhasil disetujui!
-                </div>
-            <?php elseif ($_GET['msg'] == 'rejected'): ?>
-                <div class="bg-red-50 text-red-700 p-3.5 rounded-xl mb-6 border border-red-200 shadow-sm text-sm">
-                    ❌ Pendaftaran toko penjual telah ditolak.
-                </div>
-            <?php endif; ?>
-        <?php endif; ?>
-
-        <!-- 1. TABEL VERIFIKASI PENJUAL (PENDING) -->
+        <!-- ==================== 1. VERIFIKASI PENJUAL PENDING ==================== -->
         <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-8">
             <div class="px-6 py-4 border-b bg-gray-50 flex justify-between items-center">
                 <h2 class="font-semibold text-lg text-gray-900 flex items-center gap-2">🏪 Verifikasi Pendaftaran Toko (Pending)</h2>
@@ -174,7 +114,7 @@ $deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 O
                                 <td class="px-6 py-4 text-right">
                                     <div class="flex items-center justify-end gap-2">
                                         <!-- Tombol Setujui -->
-                                        <a href="?setujui_penjual=<?= $s['id'] ?>" 
+                                        <a href="actions/admin_actions.php?setujui_penjual=<?= $s['id'] ?>" 
                                            onclick="return confirm('Setujui toko <?= htmlspecialchars($s['nama_toko']) ?> untuk mulai berjualan?')"
                                            class="px-3.5 py-2 bg-green-500 hover:bg-green-600 text-white text-xs font-bold rounded-lg transition shadow-sm cursor-pointer">
                                             ✓ Setujui
@@ -191,7 +131,7 @@ $deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 O
                                         <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-6 text-left">
                                             <h3 class="text-lg font-bold text-gray-900 mb-1">Tolak Pendaftaran Toko</h3>
                                             <p class="text-sm text-gray-500 mb-4">Berikan alasan penolakan untuk toko <strong><?= htmlspecialchars($s['nama_toko']) ?></strong>. Alasan ini akan ditampilkan ke penjual.</p>
-                                            <form method="POST" action="">
+                                            <form method="POST" action="actions/admin_actions.php">
                                                 <input type="hidden" name="penjual_id" value="<?= $s['id'] ?>">
                                                 <textarea name="alasan_penolakan" rows="3" required placeholder="Contoh: Foto KTP buram dan NIK tidak sesuai KTP." 
                                                           class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 outline-none resize-none mb-4 text-sm"></textarea>
@@ -217,7 +157,7 @@ $deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 O
             </div>
         </div>
 
-        <!-- 2. TABEL USER AKTIF -->
+        <!-- ==================== 2. USER AKTIF ==================== -->
         <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-8">
             <div class="px-6 py-4 border-b bg-gray-50">
                 <h2 class="font-semibold text-lg text-gray-900">👥 User Aktif</h2>
@@ -253,10 +193,10 @@ $deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 O
                             <td class="px-6 py-4 text-sm text-gray-500"><?= date('d/m/Y', strtotime($u['created_at'])) ?></td>
                             <td class="px-6 py-4 text-right">
                                 <?php if ($u['id'] != $_SESSION['user_id']): ?>
-                                    <a href="?hapus=<?= $u['id'] ?>" 
+                                    <a href="actions/admin_actions.php?hapus=<?= $u['id'] ?>" 
                                        onclick="return confirm('Yakin ingin menonaktifkan user ini?\n\nUser akan di-soft delete (tidak hilang permanen)')"
                                        class="text-red-600 hover:text-red-800 text-sm font-medium transition cursor-pointer">
-                                       🗑— Nonaktifkan
+                                       🗑️ Nonaktifkan
                                     </a>
                                 <?php else: ?>
                                     <span class="text-gray-400 text-sm">-</span>
@@ -269,7 +209,7 @@ $deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 O
             </div>
         </div>
 
-        <!-- 3. TABEL USER NONAKTIF (SOFT DELETED) -->
+        <!-- ==================== 3. USER NONAKTIF ==================== -->
         <?php if (mysqli_num_rows($deleted_users) > 0): ?>
         <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
             <div class="px-6 py-4 border-b bg-gray-50">
@@ -296,7 +236,7 @@ $deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 O
                             <td class="px-6 py-4 text-sm text-gray-600"><?= ucfirst($u['role']) ?></td>
                             <td class="px-6 py-4 text-sm text-gray-400"><?= date('d/m/Y H:i', strtotime($u['deleted_at'])) ?></td>
                             <td class="px-6 py-4 text-right">
-                                <a href="?restore=<?= $u['id'] ?>" 
+                                <a href="actions/admin_actions.php?restore=<?= $u['id'] ?>" 
                                    class="text-green-600 hover:text-green-800 text-sm font-medium transition cursor-pointer">
                                    ↩️ Aktifkan Kembali
                                 </a>

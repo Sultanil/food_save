@@ -1,49 +1,57 @@
 <?php
-session_start();
-include 'koneksi.php';
+// LoginPage.php - Halaman login (PUBLIK)
+require_once 'config/database.php';
 
+// Mulai session jika belum ada
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+// Cek apakah sudah login, kalau iya redirect
+if (isset($_SESSION['sudah_login']) && $_SESSION['sudah_login'] === true) {
+    // Redirect berdasarkan role
+    switch ($_SESSION['role'] ?? 'pembeli') {
+        case 'admin':
+            header("Location: dashboardAdmin.php");
+            break;
+        case 'penjual':
+            header("Location: dashboardPenjual.php");
+            break;
+        default:
+            header("Location: Index.php");
+    }
+    exit;
+}
+
+// Set variabel untuk halaman
+$site_name = "FoodSave";
+$page_title = "Login";
+$description = "Masuk ke akun FoodSave Anda";
+
+// ✅ Ambil error dari session (jika ada)
 $error = '';
+if (isset($_SESSION['login_error'])) {
+    $error = $_SESSION['login_error'];
+    unset($_SESSION['login_error']); // Hapus setelah ditampilkan
+}
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $email = trim($_POST['email'] ?? '');
-    $password = $_POST['password'] ?? '';
+// ✅ Ambil old email untuk mengisi form kembali
+$old_email = $_SESSION['login_old_email'] ?? '';
+unset($_SESSION['login_old_email']);
 
-    if (empty($email) || empty($password)) {
-        $error = 'Email dan password wajib diisi.';
-    } else {
-        // ✅ QUERY: Tambah kode_pos di SELECT
-        $stmt = $conn->prepare("SELECT id, username, nama_lengkap, email, password, role, kode_pos FROM users WHERE email = ?");
-        $stmt->bind_param("s", $email);
-        $stmt->execute();
-        $result = $stmt->get_result();
-
-        if ($result->num_rows === 1) {
-            $user = $result->fetch_assoc();
-
-            if (password_verify($password, $user['password'])) {
-                // ✅ SET SESSION - SEMUA LENGKAP
-                $_SESSION['sudah_login'] = true;
-                $_SESSION['user_id'] = $user['id'];
-                $_SESSION['nama'] = $user['nama_lengkap'];
-                $_SESSION['email'] = $user['email'];
-                $_SESSION['role'] = $user['role'];
-                $_SESSION['username'] = $user['username'];
-                $_SESSION['kode_pos'] = $user['kode_pos']; // ✅ Kode pos dari database
-
-                // ✅ Redirect berdasarkan role
-                switch ($user['role']) {
-                    case 'admin': $dest = 'dashboardAdmin.php'; break;
-                    case 'penjual': $dest = 'dashboardPenjual.php'; break;
-                    default: $dest = 'Index.php';
-                }
-                header("Location: $dest");
-                exit;
-            } else {
-                $error = 'Password salah.';
-            }
-        } else {
-            $error = 'Email tidak terdaftar.';
-        }
+// Ambil pesan dari URL (jika ada)
+$pesan = '';
+if (isset($_GET['msg'])) {
+    switch ($_GET['msg']) {
+        case 'session_expired':
+            $pesan = '⏰ Session kamu telah habis karena tidak aktif selama 5 menit. Silakan login kembali.';
+            break;
+        case 'login_required':
+            $pesan = '🔒 Kamu harus login terlebih dahulu.';
+            break;
+        case 'logged_out':
+            $pesan = '👋 Kamu telah berhasil logout.';
+            break;
     }
 }
 ?>
@@ -54,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - FoodSave</title>
+    <title><?= htmlspecialchars($page_title) ?> - <?= htmlspecialchars($site_name) ?></title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <style>
         .bg-gradient-foodsave {
@@ -72,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="w-full max-w-md mb-5">
         <!-- Brand -->
         <div class="text-center mb-8">
-            <h1 class="text-[#4CAF50] text-4xl font-bold mb-2">FoodSave</h1>
+            <h1 class="text-[#4CAF50] text-4xl font-bold mb-2"><?= htmlspecialchars($site_name) ?></h1>
             <p class="text-gray-600 text-sm">Platform jual beli makanan surplus yang berkelanjutan</p>
         </div>
 
@@ -88,11 +96,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
             <?php endif; ?>
 
-            <form method="POST" action="">
+            <!-- Pesan dari URL (session expired, dll) -->
+            <?php if ($pesan): ?>
+                <div class="bg-blue-50 text-blue-700 p-3 rounded-lg mb-5 text-center border-l-4 border-blue-600">
+                    <?php echo htmlspecialchars($pesan); ?>
+                </div>
+            <?php endif; ?>
+
+            <!-- Form action diarahkan ke actions/proses_login.php -->
+            <form method="POST" action="actions/proses_login.php">
                 <!-- Email Input -->
                 <div class="mb-5">
                     <label class="block mb-2 font-semibold text-gray-800 text-sm">Email</label>
-                    <input type="email" name="email" placeholder="nama@email.com" required
+                    <input type="email" name="email" value="<?= htmlspecialchars($old_email) ?>" placeholder="nama@email.com" required
                         class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm input-focus focus:outline-none focus:border-[#4CAF50]">
                 </div>
 
@@ -124,7 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <!-- Footer -->
         <footer class="text-center text-gray-600 text-sm py-5 w-full">
-            <p>&copy; 2026 FoodSave - Tugas Semester 2</p>
+            <p>&copy; <?= date('Y') ?> <?= htmlspecialchars($site_name) ?> - Tugas Semester 2</p>
         </footer>
     </div>
 
