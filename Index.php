@@ -25,31 +25,28 @@ $username = $is_logged_in ? htmlspecialchars($_SESSION['nama'] ?? 'Pengguna') : 
 $cart_badge_count = 0;
 
 // Handle POST untuk keranjang
-if ($is_logged_in && $_SESSION['role'] === 'pembeli') {
+if ($is_logged_in && isset($_SESSION['role']) && $_SESSION['role'] === 'pembeli') {
     $user_id = $_SESSION['user_id'];
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['produk_id'])) {
         if (isset($_POST['update_qty'])) {
             $prod_id = (int)$_POST['produk_id'];
             $qty = max(1, (int)$_POST['qty']);
-            $stmt = $conn->prepare("UPDATE keranjang SET qty = ? WHERE user_id = ? AND produk_id = ?");
-            $stmt->bind_param("iii", $qty, $user_id, $prod_id);
-            $stmt->execute();
+            $stmt = $pdo->prepare("UPDATE keranjang SET qty = ? WHERE user_id = ? AND produk_id = ?");
+            $stmt->execute([$qty, $user_id, $prod_id]);
         } elseif (isset($_POST['hapus_item'])) {
             $prod_id = (int)$_POST['produk_id'];
-            $stmt = $conn->prepare("DELETE FROM keranjang WHERE user_id = ? AND produk_id = ?");
-            $stmt->bind_param("ii", $user_id, $prod_id);
-            $stmt->execute();
+            $stmt = $pdo->prepare("DELETE FROM keranjang WHERE user_id = ? AND produk_id = ?");
+            $stmt->execute([$user_id, $prod_id]);
         }
         header("Location: " . $_SERVER['PHP_SELF']);
         exit;
     }
 
     // Hitung badge keranjang
-    $stmt = $conn->prepare("SELECT SUM(qty) as total FROM keranjang WHERE user_id = ?");
-    $stmt->bind_param("i", $user_id);
-    $stmt->execute();
-    $result = $stmt->get_result()->fetch_assoc();
+    $stmt = $pdo->prepare("SELECT SUM(qty) as total FROM keranjang WHERE user_id = ?");
+    $stmt->execute([$user_id]);
+    $result = $stmt->fetch();
     $cart_badge_count = $result['total'] ?? 0;
 }
 

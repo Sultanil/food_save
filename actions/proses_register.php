@@ -1,105 +1,100 @@
 <?php
-// actions/proses_register.php - Logika register
-
-// 1. Mulai session DI PALING AWAL
 session_start();
+header('Content-Type: application/json');
 
-// 2. Include database
 require_once '../config/database.php';
-global $conn;
+require_once '../fungsi_email.php';
 
-// 3. Cek apakah form disubmit
-if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !isset($_POST['submit'])) {
-    // Jika bukan POST, redirect ke register page
-    header("Location: ../RegisterPage.php");
+// Keamanan
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    echo json_encode(["status" => "error", "message" => "Akses tidak valid!"]);
+    exit;
+}
+// Ambil input
+$nama_lengkap = trim($_POST['nama_lengkap'] ?? '');
+$username = trim($_POST['nama'] ?? '');
+$email = trim($_POST['email'] ?? '');
+$password = $_POST['password'] ?? '';
+$kode_pos = $_POST['kode_pos'] ?? '';
+$role = $_POST['role'] ?? 'pembeli';
+
+// Validasi - Tampilkan field mana yang kosong
+$missing_fields = [];
+if (empty($nama_lengkap)) $missing_fields[] = 'Nama Lengkap';
+if (empty($username)) $missing_fields[] = 'Username';
+if (empty($email)) $missing_fields[] = 'Email';
+if (empty($password)) $missing_fields[] = 'Password';
+if (empty($kode_pos)) $missing_fields[] = 'Kode Pos';
+
+// ... sisa kode sama seperti sebelumnya ...
+
+// Validasi
+if (empty($nama_lengkap) || empty($username) || empty($email) || empty($password) || empty($kode_pos)) {
+    echo json_encode(["status" => "error", "message" => "Semua kolom harus diisi!"]);
     exit;
 }
 
-// 4. Ambil & sanitasi input
-$username = trim($_POST['nama'] ?? '');
-$nama_lengkap = trim($_POST['nama'] ?? '');
-$email = trim($_POST['email'] ?? '');
-$password = $_POST['password'] ?? '';
-$role = $_POST['role'] ?? 'pembeli';
-$kode_pos = trim($_POST['kode_pos'] ?? '');
+if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+    echo json_encode(["status" => "error", "message" => "Format email tidak valid!"]);
+    exit;
+}
 
-$error = '';
+if (strlen($password) < 6) {
+    echo json_encode(["status" => "error", "message" => "Password minimal 6 karakter!"]);
+    exit;
+}
 
-// 5. Validasi
-if (empty($username) || empty($email) || empty($password)) {
-    $error = 'Semua field harus diisi!';
-} elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-    $error = 'Format email tidak valid!';
-} elseif (strlen($password) < 6) {
-    $error = 'Password minimal 6 karakter!';
-} elseif (empty($kode_pos)) {
-    $error = 'Pilih kode pos terlebih dahulu!';
-} elseif (!in_array($role, ['pembeli', 'penjual'])) {
-    $error = 'Role tidak valid!';
-} else {
-    // 6. Cek email sudah ada?
-    $stmt_cek = $conn->prepare("SELECT id FROM users WHERE email = ?");
-    $stmt_cek->bind_param("s", $email);
-    $stmt_cek->execute();
-    $result = $stmt_cek->get_result();
+try {
+    // Cek email sudah terdaftar & terverifikasi
+    $cek = $pdo->prepare("SELECT id, is_verified FROM users WHERE email = ?");
+    $cek->execute([$email]);
+    $akun = $cek->fetch();
 
-    if ($result->num_rows > 0) {
-        $error = 'Email sudah terdaftar!';
-    } else {
-        // 7. Hash password
-        $hashed_password = password_hash($password, PASSWORD_DEFAULT);
-
-        // 8. Insert ke database dengan prepared statement
-        $stmt_insert = $conn->prepare("
-            INSERT INTO users (username, nama_lengkap, email, password, role, kode_pos) 
-            VALUES (?, ?, ?, ?, ?, ?)
-        ");
-        $stmt_insert->bind_param("ssssss", $username, $nama_lengkap, $email, $hashed_password, $role, $kode_pos);
-
-        if ($stmt_insert->execute()) {
-            // 9. Auto login setelah register berhasil
-            $user_id = $conn->insert_id;
-            
-            $_SESSION['sudah_login'] = true;
-            $_SESSION['user_id'] = $user_id;
-            $_SESSION['nama'] = $nama_lengkap;
-            $_SESSION['email'] = $email;
-            $_SESSION['role'] = $role;
-            $_SESSION['kode_pos'] = $kode_pos;
-            $_SESSION['last_activity'] = time();
-
-            // 10. Redirect berdasarkan role
-            switch ($role) {
-                case 'penjual':
-                    $dest = '../dashboardPenjual.php';
-                    break;
-                case 'admin':
-                    $dest = '../dashboardAdmin.php';
-                    break;
-                default: // pembeli
-                    $dest = '../Index.php';
-            }
-
-            header("Location: $dest");
-            exit;
-        } else {
-            $error = "Gagal mendaftar: " . $conn->error;
-        }
+    if ($akun && $akun['is_verified'] == 1) {
+        echo json_encode(["status" => "error", "message" => "Email sudah terdaftar! Silakan login."]);
+        exit;
     }
+
+    // Generate OTP
+    $kode_otp = random_int(100000, 999999);
+    $expired = date('Y-m-d H:i:s', strtotime('+10 minutes'));
+    $password_hash = password_hash($password, PASSWORD_DEFAULT);
+
+    // Simpan ke database
+    if ($akun) {
+        // Update jika pernah daftar tapi belum verifikasi
+        $stmt = $pdo->prepare("UPDATE users SET nama_lengkap=?, username=?, password=?, kode_pos=?, role=?, kode_otp=?, expired_otp=? WHERE email=?");
+        $stmt->execute([$nama_lengkap, $username, $password_hash, $kode_pos, $role, $kode_otp, $expired, $email]);
+        $id_user = $akun['id'];
+    } else {
+        // Insert user baru
+        $stmt = $pdo->prepare("INSERT INTO users (nama_lengkap, username, email, password, kode_pos, role, kode_otp, expired_otp, is_verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)");
+        $stmt->execute([$nama_lengkap, $username, $email, $password_hash, $kode_pos, $role, $kode_otp, $expired]);
+        $id_user = $pdo->lastInsertId();
+    }
+
+    // Kirim email verifikasi
+    $kirim = kirimEmailVerifikasi($email, $nama_lengkap, $kode_otp);
+
+    if ($kirim === true) {
+        $_SESSION['pending_user_id'] = $id_user;
+        echo json_encode([
+            "status" => "success",
+            "message" => "Pendaftaran berhasil! Kode verifikasi telah dikirim ke email Anda."
+        ]);
+    } else {
+        // Hapus user jika gagal kirim email
+        $pdo->prepare("DELETE FROM users WHERE id = ?")->execute([$id_user]);
+        echo json_encode([
+            "status" => "error",
+            "message" => "Gagal mengirim email verifikasi. Silakan coba lagi."
+        ]);
+    }
+} catch (PDOException $e) {
+    echo json_encode([
+        "status" => "error",
+        "message" => "Error database: " . $e->getMessage()
+    ]);
 }
 
-// 11. Jika ada error, simpan di session dan redirect kembali
-if (!empty($error)) {
-    $_SESSION['register_error'] = $error;
-    $_SESSION['register_old_input'] = [
-        'nama' => $username,
-        'email' => $email,
-        'role' => $role,
-        'kode_pos' => $kode_pos
-    ];
-}
-
-// 12. Redirect kembali ke register page
-header("Location: ../RegisterPage.php");
 exit;
-?>

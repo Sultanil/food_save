@@ -15,13 +15,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $email = trim($_POST['email']);
     $password = $_POST['password'];
 
-    $stmt = $conn->prepare("SELECT id, username, nama_lengkap, email, password, role FROM users WHERE email = ? AND role = 'admin' AND is_deleted = 0");
-    $stmt->bind_param("s", $email);
-    $stmt->execute();
-    $result = $stmt->get_result();
+    $stmt = $pdo->prepare("SELECT id, username, nama_lengkap, email, password, role FROM users WHERE email = ? AND role = 'admin' AND is_deleted = 0");
+    $stmt->execute([$email]);
+    $result = $stmt->fetch();
 
-    if ($result->num_rows === 1) {
-        $user = $result->fetch_assoc();
+    if ($result) {
+        $user = $result;
 
         if (password_verify($password, $user['password'])) {
             $_SESSION['sudah_login'] = true;

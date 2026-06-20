@@ -22,9 +22,9 @@ $query_toko = "SELECT DISTINCT
                 GROUP BY pj.id
                 ORDER BY pj.nama_toko ASC";
 
-$result_toko = $conn->query($query_toko);
-if ($result_toko && $result_toko->num_rows > 0) {
-    while ($row = $result_toko->fetch_assoc()) {
+$result_toko = $pdo->query($query_toko);
+if ($result_toko && $result_toko->rowCount() > 0) {
+    while ($row = $result_toko->fetch()) {
         $toko_list[] = [
             'penjual_id' => $row['penjual_id'],
             'nama_toko' => htmlspecialchars($row['nama_toko']),
@@ -46,12 +46,12 @@ $query_produk = "SELECT
                   WHERE p.status = 'aktif' AND p.stok > 0
                   ORDER BY pj.nama_toko, p.created_at DESC";
 
-$result_produk = $conn->query($query_produk);
-if ($result_produk && $result_produk->num_rows > 0) {
-    while ($row = $result_produk->fetch_assoc()) {
+$result_produk = $pdo->query($query_produk);
+if ($result_produk && $result_produk->rowCount() > 0) {
+    while ($row = $result_produk->fetch()) {
         $harga_tampil = !empty($row['harga_diskon']) && $row['harga_diskon'] < $row['harga_asli']
             ? $row['harga_diskon'] : $row['harga_asli'];
-        
+
         $diskon_persen = 0;
         if (!empty($row['harga_diskon']) && $row['harga_asli'] > 0) {
             $diskon_persen = round((1 - $row['harga_diskon'] / $row['harga_asli']) * 100);
@@ -80,6 +80,7 @@ $produk_json = json_encode($produk_list, JSON_UNESCAPED_UNICODE);
 
 <!DOCTYPE html>
 <html lang="id">
+
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -87,15 +88,49 @@ $produk_json = json_encode($produk_list, JSON_UNESCAPED_UNICODE);
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <style>
-        body { font-family: 'Plus Jakarta Sans', sans-serif; }
-        .page { display: none; animation: fade .3s ease; }
-        .page.active { display: block; }
-        @keyframes fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-        .card { transition: transform .2s, box-shadow .2s; }
-        .card:hover { transform: translateY(-4px); box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-        #grid-toko, #grid-produk { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 24px; }
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
+
+        .page {
+            display: none;
+            animation: fade .3s ease;
+        }
+
+        .page.active {
+            display: block;
+        }
+
+        @keyframes fade {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: none;
+            }
+        }
+
+        .card {
+            transition: transform .2s, box-shadow .2s;
+        }
+
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        }
+
+        #grid-toko,
+        #grid-produk {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 24px;
+        }
     </style>
 </head>
+
 <body class="bg-slate-50">
 
     <!-- ═══ NAVBAR (Include) ═══ -->
@@ -133,6 +168,48 @@ $produk_json = json_encode($produk_list, JSON_UNESCAPED_UNICODE);
             <!-- Diisi oleh JavaScript -->
         </div>
     </div>
+    <!-- ═══ HALAMAN DETAIL PRODUK ═══ -->
+    <div id="detail-page" class="page">
+        <div class="max-w-lg mx-auto my-16 bg-white rounded-2xl p-9 shadow-xl text-center">
+            <img id="dImg" src="" alt="" class="w-full h-52 object-cover rounded-xl mb-5" />
+            <h2 id="dName" class="text-2xl font-extrabold text-slate-800 mb-2"></h2>
+            <p id="dSeller" class="text-slate-500 text-sm mb-4"></p>
+            <span id="dPrice" class="block text-2xl font-extrabold text-green-600 mb-2"></span>
+            <p id="dStok" class="text-sm text-gray-500 mb-6"></p>
+
+            <!-- DUA TOMBOL TERPISAH -->
+            <div class="flex flex-col gap-3">
+
+                <!-- Tombol Kembali -->
+                <button type="button" onclick="kembaliKeProduk()"
+                    class="px-6 py-2 border-2 border-gray-300 text-gray-600 font-bold rounded-xl hover:bg-gray-50">
+                    ← Kembali
+                </button>
+
+                <!-- ✅ Tombol 1: Tambah ke Keranjang (Kuning) -->
+                <a id="btnAddCart" href="#"
+                    class="px-6 py-3 bg-yellow-400 text-gray-900 font-bold rounded-xl hover:bg-yellow-300 inline-flex items-center justify-center gap-2">
+                    🛒 Tambah ke Keranjang
+                </a>
+
+                <!-- ✅ Tombol 2: Beli Sekarang (Hijau) - Form Terpisah -->
+                <form id="formBeli" method="GET" action="HalamanTransaksi.php" class="w-full">
+                    <input type="hidden" name="produk" id="fProduk" />
+                    <input type="hidden" name="harga" id="fHarga" />
+                    <input type="hidden" name="seller" id="fSeller" />
+                    <input type="hidden" name="produk_id" id="fProdukId" />
+                    <input type="hidden" name="penjual_id" id="fPenjualId" />
+                    <input type="hidden" name="qty" value="1" />
+
+                    <button type="submit"
+                        class="w-full px-6 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700">
+                        ⚡ Beli Sekarang (Checkout Langsung)
+                    </button>
+                </form>
+
+            </div>
+        </div>
+    </div>
 
     <!-- Footer -->
     <footer class="text-center py-4 text-slate-400 text-xs mt-5">
@@ -145,9 +222,10 @@ $produk_json = json_encode($produk_list, JSON_UNESCAPED_UNICODE);
         const TOKO = <?= $toko_json ?>;
         const PRODUK = <?= $produk_json ?>;
     </script>
-    
+
     <!-- Include external JS -->
-    <script src="js/promosi.js"></script>
+    <script src="assets/js/promosi.js"></script>
 
 </body>
+
 </html>

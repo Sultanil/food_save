@@ -28,10 +28,9 @@ if (!$produk_id) {
 }
 
 // Cek stok & status produk
-$stmt = $conn->prepare("SELECT id, nama_produk, stok, status, gambar_url FROM produk WHERE id = ?");
-$stmt->bind_param("i", $produk_id);
-$stmt->execute();
-$produk = $stmt->get_result()->fetch_assoc();
+$stmt = $pdo->prepare("SELECT id, nama_produk, stok, status, gambar_url FROM produk WHERE id = ?");
+$stmt->execute([$produk_id]);
+$produk = $stmt->fetch();
 
 if (!$produk) {
     http_response_code(404);
@@ -52,16 +51,15 @@ if ($produk['stok'] < $qty) {
 // Insert atau update keranjang
 $query = "INSERT INTO keranjang (user_id, produk_id, qty) VALUES (?, ?, ?)
           ON DUPLICATE KEY UPDATE qty = qty + ?";
-$stmt = $conn->prepare($query);
-$stmt->bind_param("iiii", $user_id, $produk_id, $qty, $qty);
+$stmt = $pdo->prepare($query);
+$stmt->execute([$user_id, $produk_id, $qty, $qty]);
 
-if ($stmt->execute()) {
+if ($stmt->rowCount() > 0) {
     // Hitung total item di keranjang untuk badge
-    $stmt_total = $conn->prepare("SELECT SUM(qty) as total FROM keranjang WHERE user_id = ?");
-    $stmt_total->bind_param("i", $user_id);
-    $stmt_total->execute();
-    $total_item = $stmt_total->get_result()->fetch_assoc()['total'] ?? 0;
-    
+    $stmt_total = $pdo->prepare("SELECT SUM(qty) as total FROM keranjang WHERE user_id = ?");
+    $stmt_total->execute([$user_id]);
+    $total_item = $stmt_total->fetch()['total'] ?? 0;
+
     echo json_encode([
         'success' => true, 
         'message' => 'Produk ditambahkan ke keranjang!', 

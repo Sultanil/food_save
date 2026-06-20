@@ -28,11 +28,11 @@ if (isset($_GET['error'])) {
 }
 
 // Ambil list kode pos untuk dropdown
-$kode_pos_list = mysqli_query($conn, "SELECT kode_pos, kecamatan, kelurahan FROM kode_pos ORDER BY kecamatan, kelurahan");
+$kode_pos_list = $pdo->query("SELECT kode_pos, kecamatan, kelurahan FROM kode_pos ORDER BY kecamatan, kelurahan");
 
 // Cek error query
 if (!$kode_pos_list) {
-    die("Error query kode_pos: " . mysqli_error($conn));
+    die("Error query kode_pos: " . $pdo->errorInfo()[2]);
 }
 
 // Role yang dipilih (default: pembeli)
@@ -100,11 +100,18 @@ $selected_role = isset($_GET['role']) && $_GET['role'] === 'penjual' ? 'penjual'
             <?php endif; ?>
 
             <!-- Form action diarahkan ke actions/proses_register.php -->
-            <form method="POST" action="actions/proses_register.php">
+            <form method="POST" id="registerForm">
                 <!-- Nama Lengkap Input -->
                 <div class="mb-5">
                     <label class="block mb-2 font-semibold text-gray-800 text-sm">Nama Lengkap</label>
-                    <input type="text" name="nama" placeholder="Nama Anda" required
+                    <input type="text" name="nama_lengkap" placeholder="Nama Lengkap Anda" required
+                        class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm input-transition focus:outline-none focus:border-[#4CAF50]">
+                </div>
+
+                <!-- Username Input -->
+                <div class="mb-5">
+                    <label class="block mb-2 font-semibold text-gray-800 text-sm">Username</label>
+                    <input type="text" name="nama" placeholder="Pilih username" required
                         class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm input-transition focus:outline-none focus:border-[#4CAF50]">
                 </div>
 
@@ -121,7 +128,7 @@ $selected_role = isset($_GET['role']) && $_GET['role'] === 'penjual' ? 'penjual'
                     <select name="kode_pos" required
                         class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4CAF50]">
                         <option value="">Pilih Kecamatan & Kelurahan</option>
-                        <?php while ($kp = mysqli_fetch_assoc($kode_pos_list)): ?>
+                        <?php while ($kp = $kode_pos_list->fetch()): ?>
                             <option value="<?= htmlspecialchars($kp['kode_pos']) ?>">
                                 <?= htmlspecialchars($kp['kecamatan']) ?> - <?= htmlspecialchars($kp['kelurahan']) ?> (<?= $kp['kode_pos'] ?>)
                             </option>
@@ -140,7 +147,6 @@ $selected_role = isset($_GET['role']) && $_GET['role'] === 'penjual' ? 'penjual'
                 <div class="mb-6">
                     <label class="block mb-3 font-semibold text-gray-800 text-sm">Daftar Sebagai</label>
                     <div class="grid grid-cols-2 gap-3">
-
                         <!-- Role: Pembeli -->
                         <label class="role-card-wrapper cursor-pointer">
                             <input type="radio" name="role" value="pembeli" <?= $selected_role === 'pembeli' ? 'checked' : '' ?>>
@@ -158,16 +164,81 @@ $selected_role = isset($_GET['role']) && $_GET['role'] === 'penjual' ? 'penjual'
                                 <p class="text-xs text-gray-500">Jual makanan surplus</p>
                             </div>
                         </label>
-
                     </div>
                 </div>
 
+                <!-- Success/Error Message Container -->
+                <div id="message" class="hidden p-3 rounded-lg mb-4 text-center text-sm"></div>
+
                 <!-- Submit Button -->
-                <button type="submit" name="submit"
+                <button type="submit" id="btnSubmit" name="submit"
                     class="w-full py-3.5 bg-[#4CAF50] hover:bg-[#43a047] text-white font-semibold rounded-lg cursor-pointer transition-colors duration-300 mb-5">
                     Daftar
                 </button>
             </form>
+
+            <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+            <script>
+                $('#registerForm').on('submit', function(e) {
+                    e.preventDefault(); // Cegah form submit biasa
+
+                    const btn = $('#btnSubmit');
+                    const message = $('#message');
+
+                    // Disable button & show loading
+                    btn.prop('disabled', true)
+                        .removeClass('bg-[#4CAF50] hover:bg-[#43a047]')
+                        .addClass('bg-gray-400 cursor-not-allowed')
+                        .html('<svg class="animate-spin -ml-1 mr-3 h-5 w-5 inline text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Memproses...');
+                    message.hide().removeClass('bg-red-50 text-red-700 bg-green-50 text-green-700');
+
+                    $.ajax({
+                        url: 'actions/proses_register.php', // Path ke file proses
+                        type: 'POST',
+                        data: $(this).serialize(),
+                        dataType: 'json',
+                        success: function(response) {
+                            if (response.status === 'success') {
+                                // Tampilkan pesan sukses
+                                message.removeClass('hidden bg-red-50 text-red-700')
+                                    .addClass('bg-green-50 text-green-700')
+                                    .text(response.message)
+                                    .show();
+
+                                // Redirect ke halaman verifikasi setelah 2 detik
+                                setTimeout(function() {
+                                    window.location.href = 'verifikasi_page.php';
+                                }, 2000);
+                            } else {
+                                // Tampilkan error
+                                message.removeClass('hidden bg-green-50 text-green-700')
+                                    .addClass('bg-red-50 text-red-700')
+                                    .text(response.message)
+                                    .show();
+
+                                // Enable button kembali
+                                btn.prop('disabled', false)
+                                    .removeClass('bg-gray-400 cursor-not-allowed')
+                                    .addClass('bg-[#4CAF50] hover:bg-[#43a047]')
+                                    .text('Daftar');
+                            }
+                        },
+                        error: function(xhr, status, error) {
+                            message.removeClass('hidden bg-green-50 text-green-700')
+                                .addClass('bg-red-50 text-red-700')
+                                .text('Terjadi kesalahan sistem. Silakan coba lagi.')
+                                .show();
+                            console.log('Error:', xhr.responseText);
+
+                            // Enable button kembali
+                            btn.prop('disabled', false)
+                                .removeClass('bg-gray-400 cursor-not-allowed')
+                                .addClass('bg-[#4CAF50] hover:bg-[#43a047]')
+                                .text('Daftar');
+                        }
+                    });
+                });
+            </script>
 
             <!-- Login Link -->
             <p class="text-center text-sm text-gray-600">

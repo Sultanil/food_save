@@ -26,29 +26,39 @@ if (empty($email) || empty($password)) {
 } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
     $error = 'Format email tidak valid.';
 } else {
-    // 6. Query ke database dengan prepared statement
-    $stmt = $conn->prepare("SELECT id, username, nama_lengkap, email, password, role, kode_pos FROM users WHERE email = ?");
-    $stmt->bind_param("s", $email);
-    $stmt->execute();
-    $result = $stmt->get_result();
+    // 6. Query ke database - TAMBAHKAN is_verified
+    $stmt = $pdo->prepare("SELECT id, username, nama_lengkap, email, password, role, kode_pos, is_verified FROM users WHERE email = ?");
+    $stmt->execute([$email]);
+    $result = $stmt->fetch();
 
     // 7. Cek apakah user ditemukan
-    if ($result->num_rows === 1) {
-        $user = $result->fetch_assoc();
+    if ($result) {
+        $user = $result;
 
-        // 8. Verifikasi password
+        // 8. CEK VERIFIKASI EMAIL - INI YANG BARU!
+        if ($user['is_verified'] == 0) {
+            // User belum verifikasi email
+            // Simpan ke session pending dan arahkan ke halaman verifikasi
+            $_SESSION['pending_user_id'] = $user['id'];
+            $_SESSION['login_error'] = 'Email belum diverifikasi. Silakan cek inbox Anda untuk kode verifikasi.';
+            header("Location: ../verifikasi_page.php");
+            exit;
+        }
+
+        // 9. Verifikasi password
         if (password_verify($password, $user['password'])) {
-            // 9. Set session - SEMUA LENGKAP
+            // 10. Set session - SEMUA LENGKAP + TAMBAHKAN id_user
             $_SESSION['sudah_login'] = true;
+            $_SESSION['id_user'] = $user['id']; // TAMBAHKAN untuk konsistensi
             $_SESSION['user_id'] = $user['id'];
             $_SESSION['nama'] = $user['nama_lengkap'];
             $_SESSION['email'] = $user['email'];
             $_SESSION['role'] = $user['role'];
             $_SESSION['username'] = $user['username'];
             $_SESSION['kode_pos'] = $user['kode_pos'];
-            $_SESSION['last_activity'] = time(); // Penting untuk auto-logout
+            $_SESSION['last_activity'] = time();
 
-            // 10. Redirect berdasarkan role
+            // 11. Redirect berdasarkan role
             switch ($user['role']) {
                 case 'admin':
                     $dest = '../dashboardAdmin.php';
@@ -70,13 +80,13 @@ if (empty($email) || empty($password)) {
     }
 }
 
-// 11. Jika ada error, simpan di session dan redirect kembali
+// 12. Jika ada error, simpan di session dan redirect kembali
 if (!empty($error)) {
     $_SESSION['login_error'] = $error;
-    $_SESSION['login_old_email'] = $email; // Simpan email agar tidak hilang
+    $_SESSION['login_old_email'] = $email;
 }
 
-// 12. Redirect kembali ke login page
+// 13. Redirect kembali ke login page
 header("Location: ../LoginPage.php");
 exit;
 ?>
