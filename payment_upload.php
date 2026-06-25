@@ -24,17 +24,23 @@ if (empty($batch_id) || $total <= 0) {
     exit;
 }
 
-// Ambil detail transaksi
-$stmt = $conn->prepare("
-    SELECT t.*, p.nama_produk, p.gambar_url, pj.nama_toko
-    FROM transaksi t
-    JOIN produk p ON t.produk_id = p.id
-    JOIN penjual pj ON t.penjual_id = pj.id
-    WHERE t.checkout_batch_id = ? AND t.user_id = ?
-");
-$stmt->bind_param("si", $batch_id, $_SESSION['user_id']);
-$stmt->execute();
-$transaksi = $stmt->get_result()->fetch_assoc();
+// Ambil user_id dengan fallback
+$user_id = $_SESSION['user_id'] ?? $_SESSION['id_user'] ?? 0;
+
+// Fungsi untuk ambil detail transaksi
+function getTransaksi($pdo, $batch_id, $user_id) {
+    $stmt = $pdo->prepare("
+        SELECT t.*, p.nama_produk, p.gambar_url, pj.nama_toko
+        FROM transaksi t
+        JOIN produk p ON t.produk_id = p.id
+        JOIN penjual pj ON t.penjual_id = pj.id
+        WHERE t.checkout_batch_id = ? AND t.user_id = ?
+    ");
+    $stmt->execute([$batch_id, $user_id]);
+    return $stmt->fetch(PDO::FETCH_ASSOC);
+}
+
+$transaksi = getTransaksi($pdo, $batch_id, $user_id);
 
 if (!$transaksi) {
     die("Transaksi tidak ditemukan.");
@@ -64,25 +70,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['upload_bukti'])) {
             $nama_file = 'bukti_' . $batch_id . '_' . time() . '.' . $ext;
             $target_path = 'uploads/bukti/' . $nama_file;
             
+            // Pastikan folder ada
+            if (!file_exists('uploads/bukti/')) {
+                mkdir('uploads/bukti/', 0777, true);
+            }
+            
             // Upload file
             if (move_uploaded_file($file['tmp_name'], $target_path)) {
-                // Update database
-                $stmt_update = $conn->prepare("
-                    UPDATE transaksi 
-                    SET bukti_pembayaran = ?, status = 'pending', status = 'pending'
-                    WHERE checkout_batch_id = ?
-                ");
-                $stmt_update->bind_param("ss", $nama_file, $batch_id);
-                
-                if ($stmt_update->execute()) {
+                try {
+                    // Update database (PERBAIKAN: status = 'menunggu_verifikasi')
+                    $stmt_update = $pdo->prepare("
+                        UPDATE transaksi 
+                        SET bukti_pembayaran = ?, status = 'menunggu_verifikasi'
+                        WHERE checkout_batch_id = ?
+                    ");
+                    $stmt_update->execute([$nama_file, $batch_id]);
+                    
                     $pesan = '✅ Bukti pembayaran berhasil diupload! Tim kami akan memverifikasi dalam 1x24 jam.';
                     $pesan_class = 'success';
                     
                     // Refresh data transaksi
-                    $stmt->execute();
-                    $transaksi = $stmt->get_result()->fetch_assoc();
-                } else {
-                    $pesan = '❌ Gagal menyimpan data: ' . $conn->error;
+                    $transaksi = getTransaksi($pdo, $batch_id, $user_id);
+                    
+                } catch (PDOException $e) {
+                    $pesan = '❌ Gagal menyimpan data: ' . $e->getMessage();
                     $pesan_class = 'error';
                 }
             } else {

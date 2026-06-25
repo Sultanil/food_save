@@ -4,23 +4,22 @@ require_once 'config/database.php';
 require_once 'includes/session_check.php';
 
 // Cek login & role penjual
-if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'penjual') {
+if (!isset($_SESSION['sudah_login']) || ($_SESSION['role'] ?? '') !== 'penjual') {
     header("Location: LoginPage.php");
     exit;
 }
 
-$user_id = $_SESSION['user_id'];
+$user_id = $_SESSION['user_id'] ?? $_SESSION['id_user'] ?? 0;
 $error = '';
 $success = '';
 
-// Ambil list kode pos untuk dropdown
-$kode_pos_list = mysqli_query($conn, "SELECT kode_pos, kecamatan, kelurahan FROM kode_pos ORDER BY kecamatan, kelurahan");
+// Ambil list kode pos untuk dropdown (PDO)
+$kode_pos_list = $pdo->query("SELECT kode_pos, kecamatan, kelurahan FROM kode_pos ORDER BY kecamatan, kelurahan");
 
 // Cek apakah sudah punya data toko
-$cek = $conn->prepare("SELECT * FROM penjual WHERE user_id = ?");
-$cek->bind_param("i", $user_id);
-$cek->execute();
-$toko = $cek->get_result()->fetch_assoc();
+$cek = $pdo->prepare("SELECT * FROM penjual WHERE user_id = ?");
+$cek->execute([$user_id]);
+$toko = $cek->fetch(PDO::FETCH_ASSOC);
 
 if ($toko) {
     // Jika sudah disetujui atau sedang pending, jangan izinkan edit, langsung ke dashboard
@@ -33,12 +32,13 @@ if ($toko) {
 
 // Proses form submit
 if (isset($_POST['submit'])) {
-    $nama_toko = mysqli_real_escape_string($conn, $_POST['nama_toko']);
-    $kota = mysqli_real_escape_string($conn, $_POST['kota']);
-    $alamat = mysqli_real_escape_string($conn, $_POST['alamat']);
-    $no_telp = mysqli_real_escape_string($conn, $_POST['no_telp']);
-    $nik = mysqli_real_escape_string($conn, $_POST['nik']);
-    $kode_pos = mysqli_real_escape_string($conn, $_POST['kode_pos']);
+    // Ambil input (TIDAK PERLU escape karena pakai prepared statement)
+    $nama_toko = trim($_POST['nama_toko'] ?? '');
+    $kota = trim($_POST['kota'] ?? '');
+    $alamat = trim($_POST['alamat'] ?? '');
+    $no_telp = trim($_POST['no_telp'] ?? '');
+    $nik = trim($_POST['nik'] ?? '');
+    $kode_pos = trim($_POST['kode_pos'] ?? '');
     
     // Upload Gambar KTP
     $foto_ktp = $toko['foto_ktp'] ?? '';
@@ -69,21 +69,22 @@ if (isset($_POST['submit'])) {
     } elseif (empty($foto_ktp)) {
         $error = "Foto KTP wajib diunggah!";
     } else {
-        if ($toko) {
-            // Resubmit / UPDATE data toko yang ditolak
-            $stmt = $conn->prepare("UPDATE penjual SET nama_toko = ?, kota = ?, alamat = ?, no_telp = ?, nik = ?, foto_ktp = ?, kode_pos = ?, status_verifikasi = 'pending', alasan_penolakan = NULL WHERE user_id = ?");
-            $stmt->bind_param("sssssssi", $nama_toko, $kota, $alamat, $no_telp, $nik, $foto_ktp, $kode_pos, $user_id);
-        } else {
-            // Pendaftaran Baru (INSERT)
-            $stmt = $conn->prepare("INSERT INTO penjual (user_id, nama_toko, kota, alamat, no_telp, nik, foto_ktp, kode_pos, status_verifikasi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')");
-            $stmt->bind_param("isssssss", $user_id, $nama_toko, $kota, $alamat, $no_telp, $nik, $foto_ktp, $kode_pos);
-        }
-        
-        if ($stmt->execute()) {
+        try {
+            if ($toko) {
+                // Resubmit / UPDATE data toko yang ditolak
+                $stmt = $pdo->prepare("UPDATE penjual SET nama_toko = ?, kota = ?, alamat = ?, no_telp = ?, nik = ?, foto_ktp = ?, kode_pos = ?, status_verifikasi = 'pending', alasan_penolakan = NULL WHERE user_id = ?");
+                $stmt->execute([$nama_toko, $kota, $alamat, $no_telp, $nik, $foto_ktp, $kode_pos, $user_id]);
+            } else {
+                // Pendaftaran Baru (INSERT)
+                $stmt = $pdo->prepare("INSERT INTO penjual (user_id, nama_toko, kota, alamat, no_telp, nik, foto_ktp, kode_pos, status_verifikasi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')");
+                $stmt->execute([$user_id, $nama_toko, $kota, $alamat, $no_telp, $nik, $foto_ktp, $kode_pos]);
+            }
+            
             header("Location: dashboardPenjual.php?success=1");
             exit;
-        } else {
-            $error = "Gagal menyimpan data toko: " . mysqli_error($conn);
+            
+        } catch (PDOException $e) {
+            $error = "Gagal menyimpan data toko: " . $e->getMessage();
         }
     }
 }
@@ -151,7 +152,7 @@ if (isset($_POST['submit'])) {
             <select name="kode_pos" required
                     class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none bg-white transition">
                 <option value="">Pilih Kecamatan & Kelurahan</option>
-                <?php while ($kp = mysqli_fetch_assoc($kode_pos_list)): ?>
+                <?php while ($kp = $kode_pos_list->fetch(PDO::FETCH_ASSOC)): ?>
                     <option value="<?= htmlspecialchars($kp['kode_pos']) ?>" <?= (isset($toko['kode_pos']) && $toko['kode_pos'] == $kp['kode_pos']) ? 'selected' : '' ?>>
                         <?= htmlspecialchars($kp['kecamatan']) ?> - <?= htmlspecialchars($kp['kelurahan']) ?> (<?= $kp['kode_pos'] ?>)
                     </option>

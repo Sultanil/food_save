@@ -4,17 +4,16 @@ require_once 'config/database.php';
 require_once 'includes/session_check.php';
 
 // Security check
-if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'penjual') {
+if (!isset($_SESSION['sudah_login']) || ($_SESSION['role'] ?? '') !== 'penjual') {
     header("Location: LoginPage.php");
     exit;
 }
 
 // Ambil penjual_id & status
-$user_id = $_SESSION['user_id'];
-$stmt = $conn->prepare("SELECT id, status_verifikasi FROM penjual WHERE user_id = ?");
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-$penjual = $stmt->get_result()->fetch_assoc();
+$user_id = $_SESSION['user_id'] ?? $_SESSION['id_user'] ?? 0;
+$stmt = $pdo->prepare("SELECT id, status_verifikasi FROM penjual WHERE user_id = ?");
+$stmt->execute([$user_id]);
+$penjual = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$penjual || $penjual['status_verifikasi'] !== 'disetujui') {
     header("Location: dashboardPenjual.php");
@@ -26,12 +25,13 @@ $error = '';
 $success = '';
 
 if (isset($_POST['submit'])) {
-    $nama_produk = mysqli_real_escape_string($conn, $_POST['nama_produk']);
-    $deskripsi = mysqli_real_escape_string($conn, $_POST['deskripsi']);
-    $harga_asli = $_POST['harga_asli'];
-    $harga_diskon = $_POST['harga_diskon'] ?: null;
-    $stok = $_POST['stok'];
-    $satuan = mysqli_real_escape_string($conn, $_POST['satuan']);
+    // Ambil input (TIDAK PERLU escape karena pakai prepared statement)
+    $nama_produk = trim($_POST['nama_produk'] ?? '');
+    $deskripsi = trim($_POST['deskripsi'] ?? '');
+    $harga_asli = (float)$_POST['harga_asli'];
+    $harga_diskon = !empty($_POST['harga_diskon']) ? (float)$_POST['harga_diskon'] : null;
+    $stok = (int)$_POST['stok'];
+    $satuan = trim($_POST['satuan'] ?? 'pcs');
     
     // Upload gambar (opsional)
     $gambar_url = null;
@@ -50,17 +50,18 @@ if (isset($_POST['submit'])) {
         }
     }
     
-    $query = "INSERT INTO produk (penjual_id, nama_produk, deskripsi, harga_asli, harga_diskon, stok, satuan, gambar_url) 
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-    
-    $stmt = $conn->prepare($query);
-    $stmt->bind_param("issdsiss", $penjual_id, $nama_produk, $deskripsi, $harga_asli, $harga_diskon, $stok, $satuan, $gambar_url);
-    
-    if ($stmt->execute()) {
+    try {
+        $query = "INSERT INTO produk (penjual_id, nama_produk, deskripsi, harga_asli, harga_diskon, stok, satuan, gambar_url) 
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        
+        $stmt = $pdo->prepare($query);
+        $stmt->execute([$penjual_id, $nama_produk, $deskripsi, $harga_asli, $harga_diskon, $stok, $satuan, $gambar_url]);
+        
         header("Location: dashboardPenjual.php?success=1");
         exit;
-    } else {
-        $error = "Gagal menambah produk: " . mysqli_error($conn);
+        
+    } catch (PDOException $e) {
+        $error = "Gagal menambah produk: " . $e->getMessage();
     }
 }
 ?>
@@ -80,7 +81,7 @@ if (isset($_POST['submit'])) {
         <h2 class="text-2xl font-bold mb-6">Tambah Produk Baru</h2>
         
         <?php if ($error): ?>
-            <div class="bg-red-50 text-red-700 p-3 rounded-lg mb-4"><?= $error ?></div>
+            <div class="bg-red-50 text-red-700 p-3 rounded-lg mb-4"><?= htmlspecialchars($error) ?></div>
         <?php endif; ?>
         
         <form method="POST" enctype="multipart/form-data" class="space-y-4">

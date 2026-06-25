@@ -4,17 +4,16 @@ require_once 'config/database.php';
 require_once 'includes/session_check.php';
 
 // 🔐 SECURITY CHECK
-if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'penjual') {
+if (!isset($_SESSION['sudah_login']) || ($_SESSION['role'] ?? '') !== 'penjual') {
     header("Location: LoginPage.php");
     exit;
 }
 
 // Ambil data penjual & status
-$user_id = $_SESSION['user_id'];
-$stmt = $conn->prepare("SELECT id, status_verifikasi FROM penjual WHERE user_id = ?");
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-$penjual = $stmt->get_result()->fetch_assoc();
+$user_id = $_SESSION['user_id'] ?? $_SESSION['id_user'] ?? 0;
+$stmt = $pdo->prepare("SELECT id, status_verifikasi FROM penjual WHERE user_id = ?");
+$stmt->execute([$user_id]);
+$penjual = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$penjual) {
     header("Location: lengkapi_toko.php");
@@ -37,20 +36,9 @@ if (!in_array($action, ['edit', 'delete'])) {
 }
 
 // 🔍 Verifikasi produk milik penjual ini
-$stmt = $conn->prepare("SELECT * FROM produk WHERE id = ? AND penjual_id = ?");
-$stmt->bind_param("ii", $id, $penjual_id);
-$stmt->execute();
-$produk = $stmt->get_result()->fetch_assoc();
-
-// Ambil parameter URL
-$id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
-$action = $_GET['action'] ?? 'edit';
-
-// Cek apakah produk ada (tanpa filter penjual_id)
-$check_all = $conn->prepare("SELECT id, penjual_id, nama_produk FROM produk WHERE id = ?");
-$check_all->bind_param("i", $id);
-$check_all->execute();
-$result_all = $check_all->get_result();
+$stmt = $pdo->prepare("SELECT * FROM produk WHERE id = ? AND penjual_id = ?");
+$stmt->execute([$id, $penjual_id]);
+$produk = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$produk) {
     die("⚠️ Produk tidak ditemukan atau Anda tidak memiliki akses.");
@@ -64,25 +52,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     if ($action === 'delete') {
         // Selalu lakukan SOFT DELETE (nonaktifkan saja, jangan pernah hapus permanen)
-        $stmt = $conn->prepare("UPDATE produk SET status = 'nonaktif' WHERE id = ? AND penjual_id = ?");
-        $stmt->bind_param("ii", $id, $penjual_id);
-        
-        if ($stmt->execute()) {
+        try {
+            $stmt = $pdo->prepare("UPDATE produk SET status = 'nonaktif' WHERE id = ? AND penjual_id = ?");
+            $stmt->execute([$id, $penjual_id]);
+            
             header("Location: dashboardPenjual.php?msg=deactivated");
             exit;
-        } else {
-            $error = "Gagal menonaktifkan produk.";
+        } catch (PDOException $e) {
+            $error = "Gagal menonaktifkan produk: " . $e->getMessage();
         }
-    }
-
+        
     } elseif ($action === 'edit') {
         // UPDATE PRODUK
-        $nama_produk = trim($_POST['nama_produk']);
-        $deskripsi = trim($_POST['deskripsi']);
-        $harga_asli = (float)$_POST['harga_asli'];
+        $nama_produk = trim($_POST['nama_produk'] ?? '');
+        $deskripsi = trim($_POST['deskripsi'] ?? '');
+        $harga_asli = (float)($_POST['harga_asli'] ?? 0);
         $harga_diskon = !empty($_POST['harga_diskon']) ? (float)$_POST['harga_diskon'] : null;
-        $stok = (int)$_POST['stok'];
-        $satuan = trim($_POST['satuan']);
+        $stok = (int)($_POST['stok'] ?? 0);
+        $satuan = trim($_POST['satuan'] ?? 'pcs');
         
         // Handle gambar (jika diupload baru)
         $gambar_url = $produk['gambar_url'];
@@ -102,16 +89,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        $stmt = $conn->prepare("UPDATE produk SET nama_produk=?, deskripsi=?, harga_asli=?, harga_diskon=?, stok=?, satuan=?, gambar_url=? WHERE id=? AND penjual_id=?");
-        $stmt->bind_param("ssdissiis", $nama_produk, $deskripsi, $harga_asli, $harga_diskon, $stok, $satuan, $gambar_url, $id, $penjual_id);
-        
-        if ($stmt->execute()) {
+        try {
+            $stmt = $pdo->prepare("UPDATE produk SET nama_produk=?, deskripsi=?, harga_asli=?, harga_diskon=?, stok=?, satuan=?, gambar_url=? WHERE id=? AND penjual_id=?");
+            $stmt->execute([$nama_produk, $deskripsi, $harga_asli, $harga_diskon, $stok, $satuan, $gambar_url, $id, $penjual_id]);
+            
             header("Location: dashboardPenjual.php?msg=updated");
             exit;
-        } else {
-            $error = "Gagal memperbarui: " . $stmt->error;
+        } catch (PDOException $e) {
+            $error = "Gagal memperbarui: " . $e->getMessage();
         }
     }
+}
 ?>
 
 <!DOCTYPE html>

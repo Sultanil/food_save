@@ -1,15 +1,14 @@
 <?php
-// includes/ongkir_calculator.php - Logika perhitungan ongkir & voucher
+// includes/ongkir_calculator.php - Logika perhitungan ongkir & voucher (PDO Version)
 
 // ==================== FUNGSI HITUNG JARAK ====================
 if (!function_exists('getJarak')) {
-    function getJarak($conn, $pos_asal, $pos_tujuan) {
+    function getJarak($pdo, $pos_asal, $pos_tujuan) {
         if ($pos_asal === 'HUB' || $pos_asal === $pos_tujuan) return 0;
         
-        $stmt = $conn->prepare("SELECT jarak FROM matriks_jarak WHERE pos_asal = ? AND pos_tujuan = ?");
-        $stmt->bind_param("ss", $pos_asal, $pos_tujuan);
-        $stmt->execute();
-        $res = $stmt->get_result()->fetch_assoc();
+        $stmt = $pdo->prepare("SELECT jarak FROM matriks_jarak WHERE pos_asal = ? AND pos_tujuan = ?");
+        $stmt->execute([$pos_asal, $pos_tujuan]);
+        $res = $stmt->fetch(PDO::FETCH_ASSOC);
         
         return $res ? (float)$res['jarak'] : 5;
     }
@@ -17,16 +16,14 @@ if (!function_exists('getJarak')) {
 
 // ==================== FUNGSI HITUNG ONGKIR (Single Item) ====================
 if (!function_exists('hitungOngkirKonsolidasi')) {
-    function hitungOngkirKonsolidasi($conn, $seller_positions, $kode_pos_pembeli) {
+    function hitungOngkirKonsolidasi($pdo, $seller_positions, $kode_pos_pembeli) {
         if (empty($seller_positions)) return 12000;
         
         $placeholders = implode(',', array_fill(0, count($seller_positions), '?'));
-        $types = str_repeat('s', count($seller_positions));
         
-        $stmt = $conn->prepare("SELECT kode_pos, jarak_dari_hub FROM kode_pos WHERE kode_pos IN ($placeholders) ORDER BY jarak_dari_hub ASC");
-        $stmt->bind_param($types, ...$seller_positions);
-        $stmt->execute();
-        $sellers_sorted = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt = $pdo->prepare("SELECT kode_pos, jarak_dari_hub FROM kode_pos WHERE kode_pos IN ($placeholders) ORDER BY jarak_dari_hub ASC");
+        $stmt->execute($seller_positions);
+        $sellers_sorted = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
         if (empty($sellers_sorted)) return 12000;
         
@@ -34,12 +31,12 @@ if (!function_exists('hitungOngkirKonsolidasi')) {
         $total_jarak += $sellers_sorted[0]['jarak_dari_hub'];
         
         for ($i = 0; $i < count($sellers_sorted) - 1; $i++) {
-            $jarak = getJarak($conn, $sellers_sorted[$i]['kode_pos'], $sellers_sorted[$i+1]['kode_pos']);
+            $jarak = getJarak($pdo, $sellers_sorted[$i]['kode_pos'], $sellers_sorted[$i+1]['kode_pos']);
             $total_jarak += $jarak;
         }
         
         $last_pos = end($sellers_sorted)['kode_pos'];
-        $jarak_final = getJarak($conn, $last_pos, $kode_pos_pembeli);
+        $jarak_final = getJarak($pdo, $last_pos, $kode_pos_pembeli);
         $total_jarak += $jarak_final;
         
         return $total_jarak * 2000;
@@ -50,9 +47,12 @@ if (!function_exists('hitungOngkirKonsolidasi')) {
 if (!function_exists('hitungBiayaKonsolidasi')) {
     /**
      * Hitung ongkir + biaya layanan berdasarkan rute teroptimasi
-     * @return array ['ongkir' => int, 'biaya_layanan' => int, 'total_jarak' => float, 'detail' => string]
+     * @param PDO $pdo - Koneksi database PDO
+     * @param array $seller_positions - Array kode pos penjual
+     * @param string $kode_pos_pembeli - Kode pos pembeli
+     * @return array ['ongkir' => int, 'biaya_layanan' => int, 'total_jarak' => float, 'jumlah_penjual' => int, 'detail' => string]
      */
-    function hitungBiayaKonsolidasi($conn, $seller_positions, $kode_pos_pembeli) {
+    function hitungBiayaKonsolidasi($pdo, $seller_positions, $kode_pos_pembeli) {
         if (empty($seller_positions)) {
             return [
                 'ongkir' => 10000,
@@ -64,12 +64,10 @@ if (!function_exists('hitungBiayaKonsolidasi')) {
         }
 
         $placeholders = implode(',', array_fill(0, count($seller_positions), '?'));
-        $types = str_repeat('s', count($seller_positions));
 
-        $stmt = $conn->prepare("SELECT kode_pos, jarak_dari_hub FROM kode_pos WHERE kode_pos IN ($placeholders) ORDER BY jarak_dari_hub ASC");
-        $stmt->bind_param($types, ...$seller_positions);
-        $stmt->execute();
-        $sellers_sorted = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt = $pdo->prepare("SELECT kode_pos, jarak_dari_hub FROM kode_pos WHERE kode_pos IN ($placeholders) ORDER BY jarak_dari_hub ASC");
+        $stmt->execute($seller_positions);
+        $sellers_sorted = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         if (empty($sellers_sorted)) {
             return [
@@ -94,14 +92,14 @@ if (!function_exists('hitungBiayaKonsolidasi')) {
         for ($i = 0; $i < count($sellers_sorted) - 1; $i++) {
             $pos_a = $sellers_sorted[$i]['kode_pos'];
             $pos_b = $sellers_sorted[$i + 1]['kode_pos'];
-            $jarak = getJarak($conn, $pos_a, $pos_b);
+            $jarak = getJarak($pdo, $pos_a, $pos_b);
             $total_jarak += $jarak;
             $rute_detail[] = "{$pos_a} → {$pos_b} ({$jarak} km)";
         }
 
         // 3. Penjual Terakhir → Pembeli
         $last_pos = end($sellers_sorted)['kode_pos'];
-        $jarak_final = getJarak($conn, $last_pos, $kode_pos_pembeli);
+        $jarak_final = getJarak($pdo, $last_pos, $kode_pos_pembeli);
         $total_jarak += $jarak_final;
         $rute_detail[] = "{$last_pos} → {$kode_pos_pembeli} ({$jarak_final} km)";
 

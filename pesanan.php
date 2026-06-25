@@ -4,16 +4,15 @@ require_once 'config/database.php';
 require_once 'includes/session_check.php';
 
 // 🔐 SECURITY CHECK
-if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'penjual') {
+if (!isset($_SESSION['sudah_login']) || ($_SESSION['role'] ?? '') !== 'penjual') {
     header("Location: LoginPage.php");
     exit;
 }
 
-$user_id = $_SESSION['user_id'];
-$stmt = $conn->prepare("SELECT id, nama_toko, status_verifikasi FROM penjual WHERE user_id = ?");
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-$penjual = $stmt->get_result()->fetch_assoc();
+$user_id = $_SESSION['user_id'] ?? $_SESSION['id_user'] ?? 0;
+$stmt = $pdo->prepare("SELECT id, nama_toko, status_verifikasi FROM penjual WHERE user_id = ?");
+$stmt->execute([$user_id]);
+$penjual = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$penjual) { header("Location: lengkapi_toko.php"); exit; }
 $penjual_id = $penjual['id'];
@@ -28,26 +27,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     $valid_status = ['pending', 'dibayar', 'dikirim', 'selesai', 'dibatalkan'];
 
     if (in_array($new_status, $valid_status)) {
-        $check = $conn->prepare("SELECT id FROM transaksi WHERE id = ? AND penjual_id = ?");
-        $check->bind_param("ii", $transaksi_id, $penjual_id);
-        $check->execute();
-
-        if ($check->get_result()->num_rows > 0) {
-            if ($new_status === 'dikirim') {
-                $no_resi = trim($_POST['no_resi'] ?? '');
-                $upd = $conn->prepare("UPDATE transaksi SET status = 'dikirim', no_resi = ? WHERE id = ?");
-                $upd->bind_param("si", $no_resi, $transaksi_id);
-            } elseif ($new_status === 'dibatalkan') {
-                $alasan = trim($_POST['alasan_pembatalan'] ?? '');
-                $upd = $conn->prepare("UPDATE transaksi SET status = 'dibatalkan', alasan_pembatalan = ? WHERE id = ?");
-                $upd->bind_param("si", $alasan, $transaksi_id);
-            } else {
-                $upd = $conn->prepare("UPDATE transaksi SET status = ? WHERE id = ?");
-                $upd->bind_param("si", $new_status, $transaksi_id);
+        // Cek apakah transaksi milik penjual ini
+        $check = $pdo->prepare("SELECT id FROM transaksi WHERE id = ? AND penjual_id = ?");
+        $check->execute([$transaksi_id, $penjual_id]);
+        
+        if ($check->rowCount() > 0) {
+            try {
+                if ($new_status === 'dikirim') {
+                    $no_resi = trim($_POST['no_resi'] ?? '');
+                    $upd = $pdo->prepare("UPDATE transaksi SET status = 'dikirim', no_resi = ? WHERE id = ?");
+                    $upd->execute([$no_resi, $transaksi_id]);
+                } elseif ($new_status === 'dibatalkan') {
+                    $alasan = trim($_POST['alasan_pembatalan'] ?? '');
+                    $upd = $pdo->prepare("UPDATE transaksi SET status = 'dibatalkan', alasan_pembatalan = ? WHERE id = ?");
+                    $upd->execute([$alasan, $transaksi_id]);
+                } else {
+                    $upd = $pdo->prepare("UPDATE transaksi SET status = ? WHERE id = ?");
+                    $upd->execute([$new_status, $transaksi_id]);
+                }
+                $msg = 'Status pesanan berhasil diperbarui!';
+                $msg_type = 'success';
+            } catch (PDOException $e) {
+                $msg = 'Gagal memperbarui status: ' . $e->getMessage();
+                $msg_type = 'error';
             }
-            $upd->execute();
-            $msg = 'Status pesanan berhasil diperbarui!';
-            $msg_type = 'success';
         }
     }
 }
@@ -64,10 +67,9 @@ $query = "SELECT t.id as transaksi_id, t.status, t.jumlah, t.total_harga, t.tang
           WHERE t.penjual_id = ?
           ORDER BY t.tanggal_pesanan DESC";
 
-$stmt = $conn->prepare($query);
-$stmt->bind_param("i", $penjual_id);
-$stmt->execute();
-$orders = $stmt->get_result();
+$stmt = $pdo->prepare($query);
+$stmt->execute([$penjual_id]);
+$orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $status_colors = [
     'pending'    => 'bg-yellow-100 text-yellow-700 border-yellow-200',
@@ -133,7 +135,7 @@ $status_labels = [
             <?php endif; ?>
         </div>
 
-        <?php if ($orders->num_rows === 0): ?>
+        <?php if (count($orders) === 0): ?>
             <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-16 text-center">
                 <div class="text-6xl mb-4">📭</div>
                 <h3 class="text-lg font-semibold text-gray-900 mb-2">Belum Ada Pesanan</h3>
@@ -141,7 +143,7 @@ $status_labels = [
             </div>
         <?php else: ?>
             <div class="space-y-4">
-            <?php while ($o = $orders->fetch_assoc()): ?>
+            <?php foreach ($orders as $o): ?>
                 <?php $color = $status_colors[$o['status']] ?? 'bg-gray-100 text-gray-700 border-gray-200'; ?>
                 <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
 
@@ -326,7 +328,7 @@ $status_labels = [
                     </div>
                 </div>
 
-            <?php endwhile; ?>
+            <?php endforeach; ?>
             </div>
         <?php endif; ?>
 

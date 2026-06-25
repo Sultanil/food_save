@@ -22,10 +22,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = $_POST['update_qty']; // 'plus', 'minus', atau 'set'
 
         // Ambil stok produk
-        $stmt = $conn->prepare("SELECT stok FROM produk WHERE id = ? AND status = 'aktif'");
-        $stmt->bind_param("i", $produk_id);
-        $stmt->execute();
-        $produk = $stmt->get_result()->fetch_assoc();
+        $stmt = $pdo->prepare("SELECT stok FROM produk WHERE id = ? AND status = 'aktif'");
+        $stmt->execute([$produk_id]);
+        $produk = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if ($produk) {
             $stok = $produk['stok'];
@@ -42,9 +41,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Update database jika qty berubah
             if ($new_qty !== $current_qty && $new_qty > 0) {
-                $stmt = $conn->prepare("UPDATE keranjang SET qty = ? WHERE user_id = ? AND produk_id = ?");
-                $stmt->bind_param("iii", $new_qty, $user_id, $produk_id);
-                $stmt->execute();
+                $stmt = $pdo->prepare("UPDATE keranjang SET qty = ? WHERE user_id = ? AND produk_id = ?");
+                $stmt->execute([$new_qty, $user_id, $produk_id]);
             }
         }
         header("Location: keranjang.php");
@@ -54,9 +52,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Handle hapus item
     if (isset($_POST['hapus'])) {
         $produk_id = (int)$_POST['produk_id'];
-        $stmt = $conn->prepare("DELETE FROM keranjang WHERE user_id = ? AND produk_id = ?");
-        $stmt->bind_param("ii", $user_id, $produk_id);
-        $stmt->execute();
+        $stmt = $pdo->prepare("DELETE FROM keranjang WHERE user_id = ? AND produk_id = ?");
+        $stmt->execute([$user_id, $produk_id]);
         header("Location: keranjang.php");
         exit;
     }
@@ -72,15 +69,14 @@ $query = "SELECT k.*,
           WHERE k.user_id = ? AND p.status = 'aktif'
           ORDER BY pj.nama_toko, p.nama_produk";
 
-$stmt = $conn->prepare($query);
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-$cart_items = $stmt->get_result();
+$stmt = $pdo->prepare($query);
+$stmt->execute([$user_id]);
+$cart_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Hitung subtotal
 $subtotal = 0;
 $cart_array = [];
-while ($item = $cart_items->fetch_assoc()) {
+while ($item = array_shift($cart_items)) {
     $harga = !empty($item['harga_diskon']) ? $item['harga_diskon'] : $item['harga_asli'];
     $item['harga_satuan'] = $harga;
     $item['subtotal'] = $harga * $item['qty'];

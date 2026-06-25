@@ -5,31 +5,39 @@ require_once 'includes/session_check.php';
 require_once 'includes/notifikasi_admin.php';
 
 // Security: Hanya admin yang bisa akses
-if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'admin') {
+if (!isset($_SESSION['sudah_login']) || ($_SESSION['role'] ?? '') !== 'admin') {
     header("Location: admin_login.php");
     exit;
 }
 
 // ==================== AMBIL STATISTIK ====================
-$total_users = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) as total FROM users WHERE is_deleted = 0"))['total'];
-$total_penjual = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) as total FROM users WHERE role = 'penjual' AND is_deleted = 0"))['total'];
-$total_pembeli = mysqli_fetch_assoc(mysqli_query($conn, "SELECT COUNT(*) as total FROM users WHERE role = 'pembeli' AND is_deleted = 0"))['total'];
+$stmt = $pdo->query("SELECT COUNT(*) as total FROM users WHERE is_deleted = 0");
+$total_users = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+$stmt = $pdo->query("SELECT COUNT(*) as total FROM users WHERE role = 'penjual' AND is_deleted = 0");
+$total_penjual = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+$stmt = $pdo->query("SELECT COUNT(*) as total FROM users WHERE role = 'pembeli' AND is_deleted = 0");
+$total_pembeli = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
 
 // ==================== AMBIL DATA ====================
 // List penjual pending
-$pending_sellers = mysqli_query($conn, "
+$stmt = $pdo->query("
     SELECT p.*, u.nama_lengkap, u.email 
     FROM penjual p
     JOIN users u ON p.user_id = u.id
     WHERE p.status_verifikasi = 'pending' 
     ORDER BY p.id DESC
 ");
+$pending_sellers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // List users aktif
-$users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 0 ORDER BY created_at DESC");
+$stmt = $pdo->query("SELECT * FROM users WHERE is_deleted = 0 ORDER BY created_at DESC");
+$users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // List users deleted
-$deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 ORDER BY deleted_at DESC");
+$stmt = $pdo->query("SELECT * FROM users WHERE is_deleted = 1 ORDER BY deleted_at DESC");
+$deleted_users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -71,10 +79,10 @@ $deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 O
         <div class="bg-white rounded-xl shadow-sm border overflow-hidden mb-8">
             <div class="px-6 py-4 border-b bg-gray-50 flex justify-between items-center">
                 <h2 class="font-semibold text-lg text-gray-900 flex items-center gap-2">🏪 Verifikasi Pendaftaran Toko (Pending)</h2>
-                <span class="bg-yellow-100 text-yellow-800 text-xs font-bold px-2.5 py-1 rounded-full"><?= mysqli_num_rows($pending_sellers) ?> Perlu Tindakan</span>
+                <span class="bg-yellow-100 text-yellow-800 text-xs font-bold px-2.5 py-1 rounded-full"><?= count($pending_sellers) ?> Perlu Tindakan</span>
             </div>
             <div class="overflow-x-auto">
-                <?php if (mysqli_num_rows($pending_sellers) === 0): ?>
+                <?php if (count($pending_sellers) === 0): ?>
                     <div class="p-12 text-center text-gray-500">
                         <span class="text-4xl">☕</span>
                         <p class="mt-2 text-sm">Tidak ada pendaftaran toko penjual baru yang memerlukan verifikasi.</p>
@@ -90,7 +98,7 @@ $deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 O
                             </tr>
                         </thead>
                         <tbody class="divide-y">
-                            <?php while($s = mysqli_fetch_assoc($pending_sellers)): ?>
+                            <?php foreach($pending_sellers as $s): ?>
                             <tr class="hover:bg-gray-50 transition-colors">
                                 <td class="px-6 py-4">
                                     <div class="font-bold text-gray-900"><?= htmlspecialchars($s['nama_toko']) ?></div>
@@ -150,7 +158,7 @@ $deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 O
                                     </div>
                                 </td>
                             </tr>
-                            <?php endwhile; ?>
+                            <?php endforeach; ?>
                         </tbody>
                     </table>
                 <?php endif; ?>
@@ -176,7 +184,7 @@ $deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 O
                         </tr>
                     </thead>
                     <tbody class="divide-y">
-                        <?php while($u = mysqli_fetch_assoc($users)): ?>
+                        <?php foreach($users as $u): ?>
                         <tr class="hover:bg-gray-50 transition-colors">
                             <td class="px-6 py-4 text-sm font-mono"><?= $u['id'] ?></td>
                             <td class="px-6 py-4">
@@ -192,7 +200,7 @@ $deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 O
                             <td class="px-6 py-4 text-sm font-mono text-gray-600"><?= $u['kode_pos'] ?? '-' ?></td>
                             <td class="px-6 py-4 text-sm text-gray-500"><?= date('d/m/Y', strtotime($u['created_at'])) ?></td>
                             <td class="px-6 py-4 text-right">
-                                <?php if ($u['id'] != $_SESSION['user_id']): ?>
+                                <?php if ($u['id'] != ($_SESSION['user_id'] ?? $_SESSION['id_user'] ?? 0)): ?>
                                     <a href="actions/admin_actions.php?hapus=<?= $u['id'] ?>" 
                                        onclick="return confirm('Yakin ingin menonaktifkan user ini?\n\nUser akan di-soft delete (tidak hilang permanen)')"
                                        class="text-red-600 hover:text-red-800 text-sm font-medium transition cursor-pointer">
@@ -203,14 +211,14 @@ $deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 O
                                 <?php endif; ?>
                             </td>
                         </tr>
-                        <?php endwhile; ?>
+                        <?php endforeach; ?>
                     </tbody>
                 </table>
             </div>
         </div>
 
         <!-- ==================== 3. USER NONAKTIF ==================== -->
-        <?php if (mysqli_num_rows($deleted_users) > 0): ?>
+        <?php if (count($deleted_users) > 0): ?>
         <div class="bg-white rounded-xl shadow-sm border overflow-hidden">
             <div class="px-6 py-4 border-b bg-gray-50">
                 <h2 class="font-semibold text-lg text-gray-900">🚫 User Nonaktif (Soft Deleted)</h2>
@@ -228,7 +236,7 @@ $deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 O
                         </tr>
                     </thead>
                     <tbody class="divide-y">
-                        <?php while($u = mysqli_fetch_assoc($deleted_users)): ?>
+                        <?php foreach($deleted_users as $u): ?>
                         <tr class="hover:bg-gray-50 opacity-75 transition-colors">
                             <td class="px-6 py-4 text-sm font-mono"><?= $u['id'] ?></td>
                             <td class="px-6 py-4 text-sm text-gray-700"><?= htmlspecialchars($u['nama_lengkap']) ?></td>
@@ -242,7 +250,7 @@ $deleted_users = mysqli_query($conn, "SELECT * FROM users WHERE is_deleted = 1 O
                                 </a>
                             </td>
                         </tr>
-                        <?php endwhile; ?>
+                        <?php endforeach; ?>
                     </tbody>
                 </table>
             </div>

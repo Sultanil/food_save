@@ -100,6 +100,7 @@ $selected_role = isset($_GET['role']) && $_GET['role'] === 'penjual' ? 'penjual'
             <?php endif; ?>
 
             <!-- Form action diarahkan ke actions/proses_register.php -->
+            <!-- AJAX -->
             <form method="POST" id="registerForm">
                 <!-- Nama Lengkap Input -->
                 <div class="mb-5">

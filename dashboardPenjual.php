@@ -4,41 +4,37 @@ require_once 'config/database.php';
 require_once 'includes/session_check.php';
 
 // 🔐 SECURITY CHECK
-if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'penjual') {
+if (!isset($_SESSION['sudah_login']) || ($_SESSION['role'] ?? '') !== 'penjual') {
     header("Location: LoginPage.php");
     exit;
 }
 
 // Ambil user_id dari session
-$user_id = $_SESSION['user_id'] ?? 0;
+$user_id = $_SESSION['user_id'] ?? $_SESSION['id_user'] ?? 0;
 
 // ==================== AMBIL DATA PENJUAL ====================
-$stmt = $conn->prepare("SELECT id, nama_toko, status_verifikasi, alasan_penolakan FROM penjual WHERE user_id = ?");
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-$result_penjual = $stmt->get_result();
+$stmt = $pdo->prepare("SELECT id, nama_toko, status_verifikasi, alasan_penolakan FROM penjual WHERE user_id = ?");
+$stmt->execute([$user_id]);
+$penjual = $stmt->fetch(PDO::FETCH_ASSOC);
 
-if ($result_penjual->num_rows === 0) {
+if (!$penjual) {
     header("Location: lengkapi_toko.php");
     exit;
 }
 
-$penjual = $result_penjual->fetch_assoc();
 $penjual_id = $penjual['id'];
 $status_verifikasi = $penjual['status_verifikasi'] ?? 'pending';
 $alasan_penolakan = $penjual['alasan_penolakan'] ?? '';
 
 // ==================== AMBIL PRODUK PENJUAL ====================
-$stmt = $conn->prepare("SELECT id, nama_produk, harga_asli, harga_diskon, stok, satuan, gambar_url, status FROM produk WHERE penjual_id = ? ORDER BY created_at DESC");
-$stmt->bind_param("i", $penjual_id);
-$stmt->execute();
-$produk_list = $stmt->get_result();
+$stmt = $pdo->prepare("SELECT id, nama_produk, harga_asli, harga_diskon, stok, satuan, gambar_url, status FROM produk WHERE penjual_id = ? ORDER BY created_at DESC");
+$stmt->execute([$penjual_id]);
+$produk_list = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // ==================== HITUNG STATISTIK ====================
-$stmt_stats = $conn->prepare("SELECT COUNT(*) as total, SUM(stok) as total_stok FROM produk WHERE penjual_id = ?");
-$stmt_stats->bind_param("i", $penjual_id);
-$stmt_stats->execute();
-$stats = $stmt_stats->get_result()->fetch_assoc();
+$stmt_stats = $pdo->prepare("SELECT COUNT(*) as total, COALESCE(SUM(stok), 0) as total_stok FROM produk WHERE penjual_id = ?");
+$stmt_stats->execute([$penjual_id]);
+$stats = $stmt_stats->fetch(PDO::FETCH_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -141,7 +137,7 @@ $stats = $stmt_stats->get_result()->fetch_assoc();
                     <?php endif; ?>
                 </div>
 
-                <?php if ($produk_list->num_rows === 0): ?>
+                <?php if (count($produk_list) === 0): ?>
                     <!-- EMPTY STATE -->
                     <div class="p-12 text-center">
                         <div class="text-6xl mb-4">📦</div>
@@ -167,7 +163,7 @@ $stats = $stmt_stats->get_result()->fetch_assoc();
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-100">
-                                <?php while ($p = $produk_list->fetch_assoc()): ?>
+                                <?php foreach ($produk_list as $p): ?>
                                     <tr class="hover:bg-gray-50 transition-colors">
                                         <td class="px-6 py-4">
                                             <div class="flex items-center gap-3">
@@ -222,7 +218,7 @@ $stats = $stmt_stats->get_result()->fetch_assoc();
                                             </a>
                                         </td>
                                     </tr>
-                                <?php endwhile; ?>
+                                <?php endforeach; ?>
                             </tbody>
                         </table>
                     </div>

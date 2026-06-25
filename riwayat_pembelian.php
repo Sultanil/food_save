@@ -4,12 +4,12 @@ require_once 'config/database.php';
 require_once 'includes/session_check.php';
 
 // 🔐 SECURITY CHECK
-if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'pembeli') {
+if (!isset($_SESSION['sudah_login']) || ($_SESSION['role'] ?? '') !== 'pembeli') {
     header("Location: LoginPage.php");
     exit;
 }
 
-$user_id = $_SESSION['user_id'];
+$user_id = $_SESSION['user_id'] ?? $_SESSION['id_user'] ?? 0;
 $msg = '';
 $msg_class = '';
 
@@ -20,11 +20,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $transaksi_id = (int)$_POST['transaksi_id'];
         
         // Cek kepemilikan transaksi
-        $check = $conn->prepare("SELECT id FROM transaksi WHERE id = ? AND user_id = ?");
-        $check->bind_param("ii", $transaksi_id, $user_id);
-        $check->execute();
+        $check = $pdo->prepare("SELECT id FROM transaksi WHERE id = ? AND user_id = ?");
+        $check->execute([$transaksi_id, $user_id]);
         
-        if ($check->get_result()->num_rows > 0) {
+        if ($check->rowCount() > 0) {
             if (isset($_FILES['bukti']) && $_FILES['bukti']['error'] === UPLOAD_ERR_OK) {
                 $ext = pathinfo($_FILES['bukti']['name'], PATHINFO_EXTENSION);
                 $filename = 'bukti_' . $transaksi_id . '_' . time() . '.' . $ext;
@@ -36,11 +35,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 
                 if (move_uploaded_file($_FILES['bukti']['tmp_name'], $target)) {
-                    $upd = $conn->prepare("UPDATE transaksi SET bukti_pembayaran = ?, status = 'dibayar' WHERE id = ?");
-                    $upd->bind_param("si", $filename, $transaksi_id);
-                    $upd->execute();
-                    $msg = '🎉 Bukti pembayaran berhasil diunggah! Status pesanan kini telah berubah.';
-                    $msg_class = 'success';
+                    try {
+                        $upd = $pdo->prepare("UPDATE transaksi SET bukti_pembayaran = ?, status = 'dibayar' WHERE id = ?");
+                        $upd->execute([$filename, $transaksi_id]);
+                        $msg = '🎉 Bukti pembayaran berhasil diunggah! Status pesanan kini telah berubah.';
+                        $msg_class = 'success';
+                    } catch (PDOException $e) {
+                        $msg = '❌ Gagal menyimpan data: ' . $e->getMessage();
+                        $msg_class = 'error';
+                    }
                 } else {
                     $msg = '❌ Gagal mengunggah gambar. Coba lagi.';
                     $msg_class = 'error';
@@ -58,16 +61,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $alasan = trim($_POST['alasan_pembatalan'] ?? 'Dibatalkan oleh pembeli');
         
         // Hanya bisa batalkan jika status pending
-        $check = $conn->prepare("SELECT id FROM transaksi WHERE id = ? AND user_id = ? AND status = 'pending'");
-        $check->bind_param("ii", $transaksi_id, $user_id);
-        $check->execute();
+        $check = $pdo->prepare("SELECT id FROM transaksi WHERE id = ? AND user_id = ? AND status = 'pending'");
+        $check->execute([$transaksi_id, $user_id]);
         
-        if ($check->get_result()->num_rows > 0) {
-            $upd = $conn->prepare("UPDATE transaksi SET status = 'dibatalkan', alasan_pembatalan = ? WHERE id = ?");
-            $upd->bind_param("si", $alasan, $transaksi_id);
-            $upd->execute();
-            $msg = '🛑 Pesanan berhasil dibatalkan.';
-            $msg_class = 'success';
+        if ($check->rowCount() > 0) {
+            try {
+                $upd = $pdo->prepare("UPDATE transaksi SET status = 'dibatalkan', alasan_pembatalan = ? WHERE id = ?");
+                $upd->execute([$alasan, $transaksi_id]);
+                $msg = '🛑 Pesanan berhasil dibatalkan.';
+                $msg_class = 'success';
+            } catch (PDOException $e) {
+                $msg = '❌ Gagal membatalkan pesanan: ' . $e->getMessage();
+                $msg_class = 'error';
+            }
         }
     }
     
@@ -76,16 +82,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $transaksi_id = (int)$_POST['transaksi_id'];
         
         // Hanya bisa konfirmasi jika status dikirim
-        $check = $conn->prepare("SELECT id FROM transaksi WHERE id = ? AND user_id = ? AND status = 'dikirim'");
-        $check->bind_param("ii", $transaksi_id, $user_id);
-        $check->execute();
+        $check = $pdo->prepare("SELECT id FROM transaksi WHERE id = ? AND user_id = ? AND status = 'dikirim'");
+        $check->execute([$transaksi_id, $user_id]);
         
-        if ($check->get_result()->num_rows > 0) {
-            $upd = $conn->prepare("UPDATE transaksi SET status = 'selesai', shipping_status = 'selesai' WHERE id = ?");
-            $upd->bind_param("i", $transaksi_id);
-            $upd->execute();
-            $msg = '🙌 Terima kasih! Pesanan telah selesai dikonfirmasi.';
-            $msg_class = 'success';
+        if ($check->rowCount() > 0) {
+            try {
+                $upd = $pdo->prepare("UPDATE transaksi SET status = 'selesai', shipping_status = 'selesai' WHERE id = ?");
+                $upd->execute([$transaksi_id]);
+                $msg = '🙌 Terima kasih! Pesanan telah selesai dikonfirmasi.';
+                $msg_class = 'success';
+            } catch (PDOException $e) {
+                $msg = '❌ Gagal mengkonfirmasi pesanan: ' . $e->getMessage();
+                $msg_class = 'error';
+            }
         }
     }
 }
@@ -102,10 +111,9 @@ $query = "SELECT t.id as transaksi_id, t.status, t.jumlah, t.total_harga, t.tang
           WHERE t.user_id = ?
           ORDER BY t.tanggal_pesanan DESC";
 
-$stmt = $conn->prepare($query);
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-$purchases = $stmt->get_result();
+$stmt = $pdo->prepare($query);
+$stmt->execute([$user_id]);
+$purchases = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $status_colors = [
     'pending'    => 'bg-yellow-100 text-yellow-800 border-yellow-200',
@@ -163,7 +171,7 @@ $status_labels = [
             </div>
         <?php endif; ?>
 
-        <?php if ($purchases->num_rows === 0): ?>
+        <?php if (count($purchases) === 0): ?>
             <div class="bg-white rounded-2xl p-12 text-center border border-gray-150 shadow-sm">
                 <div class="text-6xl mb-4">🛒</div>
                 <h3 class="text-lg font-bold text-gray-900 mb-1">Belum Ada Riwayat Belanja</h3>
@@ -174,7 +182,7 @@ $status_labels = [
             </div>
         <?php else: ?>
             <div class="space-y-6">
-                <?php while ($p = $purchases->fetch_assoc()): ?>
+                <?php foreach ($purchases as $p): ?>
                     <div class="bg-white rounded-2xl border border-gray-150 shadow-sm overflow-hidden transition hover:shadow-md">
                         <!-- Card Header -->
                         <div class="bg-gray-50 px-6 py-4 flex flex-wrap justify-between items-center border-b border-gray-100 gap-2">
@@ -250,7 +258,7 @@ $status_labels = [
                             </div>
                         </div>
                     </div>
-                <?php endwhile; ?>
+                <?php endforeach; ?>
             </div>
         <?php endif; ?>
     </main>

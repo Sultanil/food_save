@@ -1,20 +1,20 @@
 // js/promosi.js
 
 let currentTokoId = null;
+let currentProduct = null;
 
 // Render daftar toko
 function renderToko() {
     const grid = document.getElementById('grid-toko');
     if (!grid) return;
 
-    // Debug: Cek apakah data sudah ada
     console.log('📦 Data TOKO:', TOKO);
     console.log('📦 Data PRODUK:', PRODUK);
 
     if (!TOKO || TOKO.length === 0) {
         grid.innerHTML = `
             <div class="col-span-full text-center py-20">
-                <div class="text-6xl mb-4"></div>
+                <div class="text-6xl mb-4">🏪</div>
                 <h3 class="text-xl font-semibold text-gray-700 mb-2">Belum Ada Toko Tersedia</h3>
                 <p class="text-gray-500">Yuk cek lagi nanti!</p>
             </div>`;
@@ -33,7 +33,7 @@ function renderToko() {
                 </span>
             </div>
             <h3 class="text-xl font-bold text-gray-800 mb-2">${toko.nama_toko}</h3>
-            <p class="text-gray-500 text-sm mb-4"> ${toko.kota}</p>
+            <p class="text-gray-500 text-sm mb-4">📍 ${toko.kota}</p>
             <button class="w-full py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg text-sm">
                 Lihat Produk →
             </button>
@@ -43,31 +43,24 @@ function renderToko() {
 
 // Pilih toko & tampilkan produk
 function pilihToko(penjualId) {
-    // ✅ Konversi ke string untuk pencocokan yang konsisten
     penjualId = String(penjualId);
     currentTokoId = penjualId;
 
-    // ✅ Cari toko dengan type coercion
     const toko = TOKO.find(t => String(t.penjual_id) === penjualId);
 
-    // ✅ Null check - jika toko tidak ditemukan
     if (!toko) {
         console.error('❌ Toko tidak ditemukan untuk ID:', penjualId);
-        console.log('📋 Daftar toko yang tersedia:', TOKO.map(t => t.penjual_id));
         alert('Toko tidak ditemukan! Silakan refresh halaman.');
         return;
     }
 
-    // ✅ Filter produk dengan type coercion
     const produkToko = PRODUK.filter(p => String(p.penjual_id) === penjualId);
 
-    // Update breadcrumb
     const namaDisplay = document.getElementById('toko-nama-display');
     if (namaDisplay) {
         namaDisplay.textContent = toko.nama_toko;
     }
 
-    // Render produk
     const grid = document.getElementById('grid-produk');
     if (!grid) return;
 
@@ -95,17 +88,24 @@ function pilihToko(penjualId) {
                             ${p.ol ? `<span class="text-gray-400 line-through text-xs">${p.ol}</span>` : ''}
                         </div>
                         <p class="text-xs text-gray-500 mb-3">Stok: ${p.stok} ${p.satuan}</p>
-                        <button class="w-full py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg text-sm"
-                            onclick='window.location.href="HalamanTransaksi.php?produk_id=${p.produk_id}"'>
-                            🛒 Beli Sekarang
-                        </button>
+                        
+                        <!-- ✅ DUA TOMBOL: Keranjang + Beli Langsung -->
+                        <div class="flex gap-2">
+                            <button class="flex-1 py-2 bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-bold rounded-lg text-sm"
+                                onclick="tambahKeKeranjang(${p.produk_id}, ${p.penjual_id}, this)">
+                                🛒 Keranjang
+                            </button>
+                            <button class="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg text-sm"
+                                onclick="window.location.href='HalamanTransaksi.php?produk_id=${p.produk_id}&penjual_id=${p.penjual_id}'">
+                                ⚡ Beli
+                            </button>
+                        </div>
                     </div>
                 </div>
             `).join('')}
         `;
     }
 
-    // Ganti halaman
     const tokoPage = document.getElementById('toko-page');
     const produkPage = document.getElementById('produk-page');
     if (tokoPage && produkPage) {
@@ -131,30 +131,22 @@ function kembaliKeToko() {
 function openDetail(p) {
     currentProduct = p;
 
-    // Isi data ke halaman detail
     document.getElementById('dImg').src = p.img;
     document.getElementById('dName').textContent = p.name;
     document.getElementById('dSeller').textContent = p.seller;
     document.getElementById('dPrice').textContent = p.nw;
     document.getElementById('dStok').textContent = `Stok: ${p.stok} ${p.satuan}`;
 
-    // Update link "Tambah ke Keranjang"
-    const btnCart = document.getElementById('btnAddCart');
-    if (btnCart) {
-        btnCart.href = `tambah_ke_keranjang.php?produk_id=${p.produk_id}&qty=1`;
-    }
-
-    // Update form "Beli Sekarang"
+    // Update hidden inputs
     const formBeli = document.getElementById('formBeli');
     if (formBeli) {
         document.getElementById('fProduk').value = p.name;
         document.getElementById('fHarga').value = p.harga_raw;
         document.getElementById('fSeller').value = p.seller;
-        document.getElementById('fProdukId').value = p.produk_id;
-        document.getElementById('fPenjualId').value = p.penjual_id;
+        document.getElementById('fProdukId').value = p.produk_id || p.id; // ✅ FIXED: p.id bukan produk.id
+        document.getElementById('fIdToko').value = p.penjual_id;
     }
 
-    // Pindah ke halaman detail
     document.getElementById('produk-page').classList.remove('active');
     document.getElementById('detail-page').classList.add('active');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -167,7 +159,81 @@ function kembaliKeProduk() {
     document.getElementById('produk-page').classList.add('active');
 }
 
-// Init saat DOM loaded
-document.addEventListener('DOMContentLoaded', function () {
+// ═══ FUNGSI TAMBAH KE KERANJANG (GLOBAL) ═══
+function tambahKeKeranjang(produk_id, id_toko, btnElement) {
+    const btn = btnElement;
+    const originalHTML = btn.innerHTML;
+
+    // Disable button & show loading
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ...';
+
+    // Kirim AJAX
+    fetch('actions/tambah_ke_keranjang.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: `produk_id=${produk_id}&id_toko=${id_toko}`
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            // Update badge keranjang di navbar
+            const badge = document.querySelector('.cart-badge-count');
+            if (badge) {
+                badge.textContent = data.total_items;
+                badge.classList.add('animate-bounce');
+                setTimeout(() => badge.classList.remove('animate-bounce'), 1000);
+            }
+
+            // Tampilkan notifikasi
+            if (data.cart_cleared) {
+                alert('⚠️ ' + data.message);
+            } else {
+                alert('✅ ' + data.message);
+            }
+
+            // Update tombol
+            btn.innerHTML = '✅';
+            setTimeout(() => {
+                btn.innerHTML = originalHTML;
+                btn.disabled = false;
+            }, 1500);
+
+        } else {
+            alert('❌ Error: ' + data.message);
+            btn.innerHTML = originalHTML;
+            btn.disabled = false;
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('❌ Terjadi kesalahan sistem.');
+        btn.innerHTML = originalHTML;
+        btn.disabled = false;
+    });
+}
+
+// ═══ EVENT LISTENER untuk tombol di detail-page ═══
+document.addEventListener('DOMContentLoaded', function() {
     renderToko();
+    
+    // Event listener untuk tombol di detail-page (kalau ada)
+    const btnAddCart = document.getElementById('btnAddCart');
+    if (btnAddCart) {
+        btnAddCart.addEventListener('click', function(e) {
+            e.preventDefault();
+            
+            const produk_id = document.getElementById('fProdukId')?.value;
+            const id_toko = document.getElementById('fIdToko')?.value; // ✅ FIXED: fIdToko bukan fPenjualId
+            
+            if (!produk_id || !id_toko) {
+                alert('❌ Data produk tidak valid!');
+                return;
+            }
+            
+            tambahKeKeranjang(produk_id, id_toko, this);
+        });
+    }
 });

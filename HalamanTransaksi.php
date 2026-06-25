@@ -16,16 +16,15 @@ $produk_id = isset($_GET['produk_id']) ? (int)$_GET['produk_id'] : 0;
 $penjual_id = isset($_GET['penjual_id']) ? (int)$_GET['penjual_id'] : 0;
 
 if ($produk_id > 0 && $penjual_id > 0) {
-    $stmt = $conn->prepare("
+    $stmt = $pdo->prepare("
         SELECT p.id, p.nama_produk, p.deskripsi, p.harga_asli, p.harga_diskon, p.stok, p.satuan, p.gambar_url,
                pj.nama_toko, pj.kota, pj.user_id as penjual_user_id, pj.kode_pos as penjual_kode_pos
         FROM produk p
         JOIN penjual pj ON p.penjual_id = pj.id
         WHERE p.id = ? AND p.penjual_id = ? AND p.status = 'aktif' AND p.stok > 0
     ");
-    $stmt->bind_param("ii", $produk_id, $penjual_id);
-    $stmt->execute();
-    $produk = $stmt->get_result()->fetch_assoc();
+    $stmt->execute([$produk_id, $penjual_id]);
+    $produk = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$produk) {
         die("<div class='min-h-screen flex items-center justify-center bg-gray-50'>
@@ -56,11 +55,10 @@ $pesan = '';
 $pesan_class = '';
 
 // ==================== DATA PEMBELI ====================
-$user_id = $_SESSION['user_id'];
-$stmt = $conn->prepare("SELECT nama_lengkap, email, kode_pos FROM users WHERE id = ?");
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-$user_data = $stmt->get_result()->fetch_assoc();
+$user_id = $_SESSION['user_id'] ?? $_SESSION['id_user'] ?? 0;
+$stmt = $pdo->prepare("SELECT nama_lengkap, email, kode_pos FROM users WHERE id = ?");
+$stmt->execute([$user_id]);
+$user_data = $stmt->fetch(PDO::FETCH_ASSOC);
 
 $nama = $user_data['nama_lengkap'] ?? '';
 $telepon = '';
@@ -68,7 +66,7 @@ $alamat = '';
 $pembayaran = 'Transfer Bank';
 
 $kode_pos_pembeli = $user_data['kode_pos'] ?? $_SESSION['kode_pos'] ?? '';
-$ongkir_foodsave = hitungOngkirKonsolidasi($conn, [$produk['penjual_kode_pos']], $kode_pos_pembeli);
+$ongkir_foodsave = hitungOngkirKonsolidasi($pdo, [$produk['penjual_kode_pos']], $kode_pos_pembeli);
 $ongkir = $ongkir_foodsave;
 
 // ==================== HANDLE FORM SUBMIT ====================
@@ -108,40 +106,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pesan_class = 'error';
         } else {
             // ✅ INSERT KE DATABASE
-            $stmt = $conn->prepare("
-                INSERT INTO transaksi 
-                (user_id, penjual_id, produk_id, jumlah, total_harga, status, alamat_pengiriman, no_telepon, metode_pembayaran, ongkir, diskon, kode_voucher, checkout_batch_id, shipping_status) 
-                VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, 'diproses')
-            ");
+            try {
+                $batch_id = generateBatchId($user_id);
+                
+                $stmt = $pdo->prepare("
+                    INSERT INTO transaksi 
+                    (user_id, penjual_id, produk_id, jumlah, total_harga, status, alamat_pengiriman, no_telepon, metode_pembayaran, ongkir, diskon, kode_voucher, checkout_batch_id, shipping_status) 
+                    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, 'diproses')
+                ");
 
-            $batch_id = generateBatchId($user_id);
+                $stmt->execute([
+                    $user_id,
+                    $penjual_id,
+                    $produk_id,
+                    $jumlah_produk,
+                    $total_bayar,
+                    $alamat,
+                    $telepon,
+                    $pembayaran,
+                    $ongkir,
+                    $diskon,
+                    $kode_voucher,
+                    $batch_id
+                ]);
 
-            $stmt->bind_param(
-                "iiidssssddss",
-                $user_id,
-                $penjual_id,
-                $produk_id,
-                $jumlah_produk,
-                $total_bayar,
-                $alamat,
-                $telepon,
-                $pembayaran,
-                $ongkir,
-                $diskon,
-                $kode_voucher,
-                $batch_id
-            );
-
-            if ($stmt->execute()) {
                 // Kurangi stok produk
-                $stmt_update = $conn->prepare("UPDATE produk SET stok = stok - ? WHERE id = ?");
-                $stmt_update->bind_param("ii", $jumlah_produk, $produk_id);
-                $stmt_update->execute();
+                $stmt_update = $pdo->prepare("UPDATE produk SET stok = stok - ? WHERE id = ?");
+                $stmt_update->execute([$jumlah_produk, $produk_id]);
 
                 header("Location: payment_upload.php?batch_id=$batch_id&total=$total_bayar&pembayaran=" . urlencode($pembayaran));
                 exit;
-            } else {
-                $pesan = '❌ Gagal memproses pesanan: ' . mysqli_error($conn);
+                
+            } catch (PDOException $e) {
+                $pesan = '❌ Gagal memproses pesanan: ' . $e->getMessage();
                 $pesan_class = 'error';
             }
         }

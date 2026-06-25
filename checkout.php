@@ -1,19 +1,33 @@
 <?php
-// checkout.php - Checkout dari keranjang (multi-item)
+// checkout.php - Checkout dari keranjang (multi-item) - PDO + AJAX
 session_start();
 require_once 'config/database.php';
 require_once 'includes/session_check.php';
 require_once 'includes/functions.php';
 require_once 'includes/ongkir_calculator.php';
 
-// Security check
-if (!isset($_SESSION['sudah_login']) || $_SESSION['role'] !== 'pembeli') {
+// 🔐 Security check
+if (!isset($_SESSION['sudah_login']) || ($_SESSION['role'] ?? '') !== 'pembeli') {
     header("Location: LoginPage.php");
     exit;
 }
 
+// ==================== DETEKSI AJAX REQUEST ====================
+$is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && 
+           strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+
+// Helper function untuk return JSON response
+function jsonResponse($status, $message, $extra = []) {
+    header('Content-Type: application/json');
+    echo json_encode(array_merge([
+        'status' => $status,
+        'message' => $message
+    ], $extra));
+    exit;
+}
+
 // ==================== AMBIL DATA USER ====================
-$user_id = $_SESSION['user_id'];
+$user_id = $_SESSION['user_id'] ?? $_SESSION['id_user'] ?? 0;
 $kode_pos_pembeli = $_SESSION['kode_pos'] ?? '';
 
 // ==================== AMBIL PAYLOAD DARI POST ====================
@@ -22,18 +36,22 @@ $cart_items = json_decode($cart_items_raw, true);
 $subtotal = isset($_POST['subtotal']) ? (float)$_POST['subtotal'] : 0;
 
 if (empty($cart_items)) {
-    header("Location: keranjang.php");
-    exit;
+    if ($is_ajax) {
+        jsonResponse('error', 'Keranjang kosong!');
+    } else {
+        header("Location: keranjang.php");
+        exit;
+    }
 }
 
 // ==================== HITUNG ONGKIR KONSOLIDASI ====================
 $seller_positions = array_unique(array_filter(array_column($cart_items, 'penjual_kode_pos')));
-$hasil_konsolidasi = hitungBiayaKonsolidasi($conn, $seller_positions, $kode_pos_pembeli);
+$hasil_konsolidasi = hitungBiayaKonsolidasi($pdo, $seller_positions, $kode_pos_pembeli);
 $ongkir_konsolidasi = $hasil_konsolidasi['ongkir'];
 $biaya_layanan = $hasil_konsolidasi['biaya_layanan'];
 
 // ==================== DEFAULT VALUES ====================
-$nama = $_SESSION['nama'] ?? '';
+$nama = $_SESSION['nama_lengkap'] ?? $_SESSION['nama'] ?? '';
 $telepon = '';
 $alamat = '';
 $kode_voucher = '';
@@ -46,7 +64,6 @@ $pesan_class = '';
 
 // ==================== HANDLE FORM SUBMIT ====================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Ambil input user
     $nama = trim($_POST['nama'] ?? '');
     $telepon = trim($_POST['telepon'] ?? '');
     $alamat = trim($_POST['alamat'] ?? '');
@@ -60,7 +77,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ongkir = $ongkir_konsolidasi;
     }
 
-    // Voucher logic (pakai helper function)
+    // Voucher logic
     $kode_voucher_input = strtoupper(trim($_POST['voucher'] ?? ''));
     if (!empty($kode_voucher_input)) {
         $voucher_result = hitungDiskonVoucher($kode_voucher_input, $subtotal);
@@ -84,29 +101,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Hitung total
     $total_bayar = $subtotal + $biaya_layanan + $ongkir - $diskon;
 
-    // Handle "Terapkan Voucher"
+    // ==================== HANDLE "TERAPKAN VOUCHER" (AJAX) ====================
     if (isset($_POST['apply_voucher'])) {
-        if (!empty($kode_voucher)) {
-            $pesan = '🎉 Voucher ' . $kode_voucher . ' berhasil diterapkan!';
-            $pesan_class = 'success';
+        if ($is_ajax) {
+            if (!empty($kode_voucher)) {
+                jsonResponse('success', '🎉 Voucher berhasil diterapkan!', [
+                    'diskon' => $diskon,
+                    'kode_voucher' => $kode_voucher,
+                    'total_bayar' => $total_bayar,
+                    'formatted_diskon' => 'Rp ' . number_format($diskon, 0, ',', '.'),
+                    'formatted_total' => 'Rp ' . number_format($total_bayar, 0, ',', '.')
+                ]);
+            } else {
+                jsonResponse('error', $voucher_result['pesan'] ?? 'Kode voucher tidak valid');
+            }
+        } else {
+            if (!empty($kode_voucher)) {
+                $pesan = '🎉 Voucher ' . $kode_voucher . ' berhasil diterapkan!';
+                $pesan_class = 'success';
+            }
         }
     }
 
-    // Handle "Bayar Sekarang"
+    // ==================== HANDLE "BAYAR SEKARANG" (AJAX) ====================
     if (isset($_POST['bayar_sekarang'])) {
         // Validasi
         if (empty($nama) || empty($telepon) || empty($alamat)) {
-            $pesan = '⚠️ Mohon lengkapi Nama, Nomor WhatsApp, dan Alamat Pengiriman.';
-            $pesan_class = 'error';
+            $error_msg = '⚠️ Mohon lengkapi Nama, Nomor WhatsApp, dan Alamat Pengiriman.';
+            if ($is_ajax) {
+                jsonResponse('error', $error_msg);
+            } else {
+                $pesan = $error_msg;
+                $pesan_class = 'error';
+            }
         } elseif ($pengiriman === 'foodsave' && empty($kode_pos_pembeli)) {
-            $pesan = '⚠️ Kode pos pembeli belum terdaftar. Silakan lengkapi profil Anda terlebih dahulu.';
-            $pesan_class = 'error';
+            $error_msg = '⚠️ Kode pos pembeli belum terdaftar. Silakan lengkapi profil Anda.';
+            if ($is_ajax) {
+                jsonResponse('error', $error_msg);
+            } else {
+                $pesan = $error_msg;
+                $pesan_class = 'error';
+            }
         } else {
             // Generate batch ID
             $batch_id = generateBatchId($user_id);
 
             // Mulai transaction
-            $conn->begin_transaction();
+            $pdo->beginTransaction();
 
             try {
                 // Simpan transaksi untuk SETIAP item
@@ -122,14 +163,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $diskon_item = ($index === 0) ? $diskon : 0;
                     $total_item = ($harga * $qty) + $ongkir_item + $layanan_item - $diskon_item;
 
-                    $stmt = $conn->prepare("
+                    $stmt = $pdo->prepare("
                         INSERT INTO transaksi 
                         (user_id, penjual_id, produk_id, jumlah, total_harga, status, alamat_pengiriman, no_telepon, metode_pembayaran, ongkir, diskon, kode_voucher, checkout_batch_id, shipping_status, shipping_method) 
                         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, 'diproses', ?)
                     ");
 
-                    $stmt->bind_param(
-                        "iiidssssddsss",
+                    $stmt->execute([
                         $user_id,
                         $penjual_id,
                         $produk_id,
@@ -143,32 +183,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $kode_voucher,
                         $batch_id,
                         $pengiriman
-                    );
-
-                    $stmt->execute();
+                    ]);
 
                     // Kurangi stok produk
-                    $stmt_update = $conn->prepare("UPDATE produk SET stok = stok - ? WHERE id = ?");
-                    $stmt_update->bind_param("ii", $qty, $produk_id);
-                    $stmt_update->execute();
+                    $stmt_update = $pdo->prepare("UPDATE produk SET stok = stok - ? WHERE id = ?");
+                    $stmt_update->execute([$qty, $produk_id]);
                 }
 
                 // Kosongkan keranjang
-                $stmt_clear = $conn->prepare("DELETE FROM keranjang WHERE user_id = ?");
-                $stmt_clear->bind_param("i", $user_id);
-                $stmt_clear->execute();
+                $stmt_clear = $pdo->prepare("DELETE FROM keranjang WHERE user_id = ?");
+                $stmt_clear->execute([$user_id]);
 
                 // Commit transaction
-                $conn->commit();
+                $pdo->commit();
 
-                // Redirect ke payment summary
-                header("Location: payment_summary.php?batch_id=$batch_id&total=$total_bayar&pembayaran=" . urlencode($pembayaran) . "&pengiriman=" . urlencode($pengiriman));
-                exit;
-            } catch (Exception $e) {
-                $conn->rollback();
-                $pesan = '❌ Terjadi kesalahan saat memproses pesanan. Silakan coba lagi.';
-                $pesan_class = 'error';
+                // Response berdasarkan AJAX atau form biasa
+                $redirect_url = "payment_summary.php?batch_id=$batch_id&total=$total_bayar&pembayaran=" . urlencode($pembayaran) . "&pengiriman=" . urlencode($pengiriman);
+                
+                if ($is_ajax) {
+                    jsonResponse('success', '✅ Pesanan berhasil dibuat! Mengalihkan ke halaman pembayaran...', [
+                        'redirect_url' => $redirect_url,
+                        'batch_id' => $batch_id
+                    ]);
+                } else {
+                    header("Location: $redirect_url");
+                    exit;
+                }
+
+            } catch (PDOException $e) {
+                $pdo->rollBack();
+                $error_msg = '❌ Terjadi kesalahan saat memproses pesanan: ' . $e->getMessage();
                 error_log("Checkout error: " . $e->getMessage());
+                
+                if ($is_ajax) {
+                    jsonResponse('error', $error_msg);
+                } else {
+                    $pesan = $error_msg;
+                    $pesan_class = 'error';
+                }
             }
         }
     }
@@ -217,6 +269,14 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
         .section-highlight {
             animation: highlight-section 1s ease-out;
         }
+
+        /* Loading spinner */
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .spinner {
+            animation: spin 1s linear infinite;
+        }
     </style>
 </head>
 
@@ -239,14 +299,17 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
             <p class="text-gray-500 mt-2">Lengkapi data dan selesaikan pembayaran pesanan makanan surplus Anda</p>
         </div>
 
-        <!-- Alert Message -->
+        <!-- Alert Message (untuk fallback non-AJAX) -->
         <?php if ($pesan): ?>
-            <div class="mb-6 p-4 rounded-xl border-2 <?= $pesan_class === 'success'
+            <div id="fallbackMessage" class="mb-6 p-4 rounded-xl border-2 <?= $pesan_class === 'success'
                                                             ? 'bg-green-50 border-green-200 text-green-700'
                                                             : 'bg-red-50 border-red-200 text-red-700' ?>">
                 <?= htmlspecialchars($pesan) ?>
             </div>
         <?php endif; ?>
+
+        <!-- AJAX Alert Message -->
+        <div id="ajaxMessage" class="hidden mb-6 p-4 rounded-xl border-2"></div>
 
         <!-- Checkout Grid -->
         <div class="grid lg:grid-cols-3 gap-6">
@@ -333,7 +396,7 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
 
                         <div class="space-y-4">
                             <!-- FoodSave Delivery -->
-                            <label class="relative block p-4 border-2 rounded-xl cursor-pointer transition-all duration-200 
+                            <label class="relative block p-4 border-2 rounded-xl cursor-pointer transition-all duration-200 shipping-option
                       <?= $pengiriman === 'foodsave'
                             ? 'border-green-500 bg-green-50/40 shadow-md shadow-green-500/10'
                             : 'border-gray-200 bg-white hover:border-green-300 hover:shadow-sm' ?>">
@@ -341,8 +404,7 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                                     <div class="flex-shrink-0 mt-1">
                                         <input type="radio" name="pengiriman" value="foodsave"
                                             class="w-5 h-5 text-green-600 border-gray-300 focus:ring-green-500"
-                                            <?= $pengiriman === 'foodsave' ? 'checked' : '' ?>
-                                            onchange="submitWithHash(this, '#section-shipping')">
+                                            <?= $pengiriman === 'foodsave' ? 'checked' : '' ?>>
                                     </div>
 
                                     <div class="flex-1 min-w-0">
@@ -376,7 +438,7 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                             </label>
 
                             <!-- Pick Up -->
-                            <label class="relative block p-4 border-2 rounded-xl cursor-pointer transition-all duration-200 
+                            <label class="relative block p-4 border-2 rounded-xl cursor-pointer transition-all duration-200 shipping-option
                       <?= $pengiriman === 'pickup'
                             ? 'border-blue-500 bg-blue-50/40 shadow-md shadow-blue-500/10'
                             : 'border-gray-200 bg-white hover:border-blue-300 hover:shadow-sm' ?>">
@@ -384,8 +446,7 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                                     <div class="flex-shrink-0 mt-1">
                                         <input type="radio" name="pengiriman" value="pickup"
                                             class="w-5 h-5 text-blue-600 border-gray-300 focus:ring-blue-500"
-                                            <?= $pengiriman === 'pickup' ? 'checked' : '' ?>
-                                            onchange="submitWithHash(this, '#section-shipping')">
+                                            <?= $pengiriman === 'pickup' ? 'checked' : '' ?>>
                                     </div>
 
                                     <div class="flex-1 min-w-0">
@@ -415,19 +476,17 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                         </h2>
 
                         <div class="grid grid-cols-2 gap-3">
-                            <label class="radio-card flex-col items-center text-center <?= $pembayaran === 'Transfer Bank' ? 'selected' : '' ?>">
+                            <label class="radio-card flex-col items-center text-center payment-option <?= $pembayaran === 'Transfer Bank' ? 'selected' : '' ?>">
                                 <input type="radio" name="pembayaran" value="Transfer Bank" class="sr-only"
-                                    <?= $pembayaran === 'Transfer Bank' ? 'checked' : '' ?>
-                                    onchange="submitWithHash(this, '#section-payment')">
+                                    <?= $pembayaran === 'Transfer Bank' ? 'checked' : '' ?>>
                                 <div class="text-3xl mb-2">🏦</div>
                                 <span class="font-semibold text-gray-900 text-sm">Transfer Bank</span>
                                 <span class="text-xs text-gray-500 mt-1">BCA, Mandiri, BRI, BNI</span>
                             </label>
 
-                            <label class="radio-card flex-col items-center text-center <?= $pembayaran === 'QRIS' ? 'selected' : '' ?>">
+                            <label class="radio-card flex-col items-center text-center payment-option <?= $pembayaran === 'QRIS' ? 'selected' : '' ?>">
                                 <input type="radio" name="pembayaran" value="QRIS" class="sr-only"
-                                    <?= $pembayaran === 'QRIS' ? 'checked' : '' ?>
-                                    onchange="submitWithHash(this, '#section-payment')">
+                                    <?= $pembayaran === 'QRIS' ? 'checked' : '' ?>>
                                 <div class="text-3xl mb-2">📱</div>
                                 <span class="font-semibold text-gray-900 text-sm">QRIS</span>
                                 <span class="text-xs text-gray-500 mt-1">Scan & bayar dengan e-wallet</span>
@@ -455,29 +514,31 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                         </div>
 
                         <div class="flex gap-2">
-                            <input type="text" name="voucher" value="<?= htmlspecialchars($kode_voucher) ?>" placeholder="Masukkan kode voucher"
+                            <input type="text" name="voucher" id="voucherInput" value="<?= htmlspecialchars($kode_voucher) ?>" placeholder="Masukkan kode voucher"
                                 class="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none uppercase text-sm font-mono"
                                 maxlength="20">
-                            <button type="submit" name="apply_voucher"
+                            <button type="button" id="btnApplyVoucher"
                                 class="px-5 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition text-sm cursor-pointer">
                                 Terapkan
                             </button>
                         </div>
 
-                        <?php if (!empty($kode_voucher) && $diskon > 0): ?>
-                            <p class="text-xs text-green-600 mt-2 flex items-center gap-1">
-                                ✅ Voucher <strong><?= htmlspecialchars($kode_voucher) ?></strong> aktif: Potongan Rp <?= number_format($diskon, 0, ',', '.') ?>
-                            </p>
-                        <?php elseif (!empty($_POST['voucher']) && empty($kode_voucher)): ?>
-                            <p class="text-xs text-red-500 mt-2">❌ Kode voucher tidak valid atau sudah kadaluarsa</p>
-                        <?php endif; ?>
+                        <div id="voucherStatus">
+                            <?php if (!empty($kode_voucher) && $diskon > 0): ?>
+                                <p class="text-xs text-green-600 mt-2 flex items-center gap-1">
+                                    ✅ Voucher <strong><?= htmlspecialchars($kode_voucher) ?></strong> aktif: Potongan Rp <?= number_format($diskon, 0, ',', '.') ?>
+                                </p>
+                            <?php elseif (!empty($_POST['voucher']) && empty($kode_voucher)): ?>
+                                <p class="text-xs text-red-500 mt-2">❌ Kode voucher tidak valid atau sudah kadaluarsa</p>
+                            <?php endif; ?>
+                        </div>
                     </div>
 
                     <!-- Submit Button -->
-                    <button type="submit" name="bayar_sekarang"
+                    <button type="submit" name="bayar_sekarang" id="btnBayar"
                         class="w-full py-4 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl transition shadow-lg hover:shadow-xl text-lg cursor-pointer flex items-center justify-center gap-2">
                         <span>🔒</span>
-                        Bayar Sekarang • <span>Rp <?= number_format($total_bayar, 0, ',', '.') ?></span>
+                        <span id="btnBayarText">Bayar Sekarang • Rp <?= number_format($total_bayar, 0, ',', '.') ?></span>
                     </button>
 
                     <p class="text-xs text-gray-400 text-center">
@@ -502,22 +563,20 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                         </div>
                         <div class="flex justify-between">
                             <span class="text-gray-500">Pengiriman</span>
-                            <span class="font-medium">
+                            <span class="font-medium" id="displayOngkir">
                                 <?= $pengiriman === 'pickup' ? 'Gratis (Pick Up)' : 'Rp ' . number_format($ongkir, 0, ',', '.') ?>
                                 <span class="text-xs text-gray-400 block">(<?= $pengiriman === 'pickup' ? 'Ambil Sendiri' : 'FoodSave Delivery' ?>)</span>
                             </span>
                         </div>
-                        <?php if ($diskon > 0): ?>
-                            <div class="flex justify-between text-green-600 font-semibold">
-                                <span>Potongan Voucher</span>
-                                <span>- Rp <?= number_format($diskon, 0, ',', '.') ?></span>
-                            </div>
-                        <?php endif; ?>
+                        <div class="flex justify-between text-green-600 font-semibold" id="displayDiskonRow" style="<?= $diskon > 0 ? '' : 'display:none;' ?>">
+                            <span>Potongan Voucher</span>
+                            <span id="displayDiskon">- Rp <?= number_format($diskon, 0, ',', '.') ?></span>
+                        </div>
                     </div>
 
                     <div class="flex justify-between text-lg font-bold text-gray-900 pt-4 mt-4 border-t-2 border-green-600">
                         <span>Total Bayar</span>
-                        <span>Rp <?= number_format($total_bayar, 0, ',', '.') ?></span>
+                        <span id="displayTotal">Rp <?= number_format($total_bayar, 0, ',', '.') ?></span>
                     </div>
 
                     <div class="mt-6 pt-4 border-t">
@@ -550,8 +609,230 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
         <p>© <?= date('Y') ?> FoodSave. All rights reserved.</p>
     </footer>
 
+    <!-- jQuery untuk AJAX -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    
     <!-- Load JavaScript dari file terpisah -->
     <script src="assets/js/checkout_cart.js"></script>
+
+    <!-- AJAX Script untuk Checkout -->
+    <script>
+    $(document).ready(function() {
+        // ==================== VARIABEL GLOBAL ====================
+        const subtotal = <?= $subtotal ?>;
+        const biayaLayanan = <?= $biaya_layanan ?>;
+        let ongkir = <?= $ongkir_konsolidasi ?>;
+        let diskon = <?= $diskon ?>;
+        const ongkirPickup = 0;
+
+        // ==================== HELPER FUNCTIONS ====================
+        function formatRupiah(angka) {
+            return 'Rp ' + angka.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+        }
+
+        function updateTotalDisplay() {
+            const total = subtotal + biayaLayanan + ongkir - diskon;
+            $('#displayTotal').text(formatRupiah(Math.max(0, total)));
+            $('#btnBayarText').html('Bayar Sekarang • ' + formatRupiah(Math.max(0, total)));
+        }
+
+        function showMessage(type, message) {
+            const alertClass = type === 'success' 
+                ? 'bg-green-50 border-green-200 text-green-700' 
+                : 'bg-red-50 border-red-200 text-red-700';
+            
+            $('#ajaxMessage')
+                .removeClass('hidden bg-green-50 border-green-200 text-green-700 bg-red-50 border-red-200 text-red-700')
+                .addClass(alertClass)
+                .text(message)
+                .show();
+            
+            // Scroll ke atas
+            $('html, body').animate({ scrollTop: $('#ajaxMessage').offset().top - 100 }, 500);
+            
+            // Auto-hide setelah 5 detik
+            setTimeout(() => {
+                $('#ajaxMessage').fadeOut();
+            }, 5000);
+        }
+
+        function setLoading(isLoading) {
+            const btn = $('#btnBayar');
+            if (isLoading) {
+                btn.prop('disabled', true)
+                   .removeClass('bg-green-600 hover:bg-green-700')
+                   .addClass('bg-gray-400 cursor-not-allowed');
+                $('#btnBayarText').html(`
+                    <svg class="spinner w-5 h-5 inline mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Memproses pesanan...
+                `);
+            } else {
+                btn.prop('disabled', false)
+                   .removeClass('bg-gray-400 cursor-not-allowed')
+                   .addClass('bg-green-600 hover:bg-green-700');
+                updateTotalDisplay();
+            }
+        }
+
+        // ==================== HANDLE FORM SUBMIT (AJAX) ====================
+        $('#checkoutForm').on('submit', function(e) {
+            e.preventDefault();
+            
+            // Validasi client-side
+            const nama = $('input[name="nama"]').val().trim();
+            const telepon = $('input[name="telepon"]').val().trim();
+            const alamat = $('textarea[name="alamat"]').val().trim();
+            
+            if (!nama || !telepon || !alamat) {
+                showMessage('error', '⚠️ Mohon lengkapi Nama, Nomor WhatsApp, dan Alamat Pengiriman.');
+                return;
+            }
+
+            setLoading(true);
+            $('#ajaxMessage').hide();
+
+            $.ajax({
+                url: window.location.href,
+                type: 'POST',
+                data: $(this).serialize() + '&bayar_sekarang=1',
+                dataType: 'json',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                success: function(response) {
+                    if (response.status === 'success') {
+                        showMessage('success', response.message);
+                        
+                        // Redirect ke halaman pembayaran
+                        setTimeout(function() {
+                            window.location.href = response.redirect_url;
+                        }, 1500);
+                    } else {
+                        showMessage('error', response.message);
+                        setLoading(false);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    console.error('AJAX Error:', error);
+                    console.error('Response:', xhr.responseText);
+                    
+                    let errorMsg = '❌ Terjadi kesalahan sistem.';
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        if (response.message) errorMsg = response.message;
+                    } catch(e) {}
+                    
+                    showMessage('error', errorMsg);
+                    setLoading(false);
+                }
+            });
+        });
+
+        // ==================== HANDLE APPLY VOUCHER (AJAX) ====================
+        $('#btnApplyVoucher').on('click', function() {
+            const btn = $(this);
+            const voucherCode = $('#voucherInput').val().trim();
+            
+            if (!voucherCode) {
+                showMessage('error', 'Masukkan kode voucher terlebih dahulu!');
+                return;
+            }
+            
+            const originalText = btn.text();
+            btn.prop('disabled', true).html(`
+                <svg class="spinner w-4 h-4 inline mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Memproses...
+            `);
+
+            $.ajax({
+                url: window.location.href,
+                type: 'POST',
+                data: {
+                    apply_voucher: '1',
+                    voucher: voucherCode,
+                    cart_items: $('input[name="cart_items"]').val(),
+                    subtotal: $('input[name="subtotal"]').val(),
+                    pengiriman: $('input[name="pengiriman"]:checked').val()
+                },
+                dataType: 'json',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                success: function(response) {
+                    if (response.status === 'success') {
+                        // Update diskon
+                        diskon = response.diskon;
+                        
+                        // Update tampilan
+                        $('#displayDiskon').text('- ' + response.formatted_diskon);
+                        $('#displayDiskonRow').show();
+                        $('#displayTotal').text(response.formatted_total);
+                        
+                        // Update status voucher
+                        $('#voucherStatus').html(`
+                            <p class="text-xs text-green-600 mt-2 flex items-center gap-1">
+                                ✅ Voucher <strong>${response.kode_voucher}</strong> aktif: Potongan ${response.formatted_diskon}
+                            </p>
+                        `);
+                        
+                        // Update tombol bayar
+                        updateTotalDisplay();
+                        
+                        showMessage('success', response.message);
+                    } else {
+                        showMessage('error', response.message);
+                        $('#voucherStatus').html(`
+                            <p class="text-xs text-red-500 mt-2">❌ ${response.message}</p>
+                        `);
+                    }
+                    
+                    btn.prop('disabled', false).text(originalText);
+                },
+                error: function() {
+                    showMessage('error', '❌ Terjadi kesalahan. Silakan coba lagi.');
+                    btn.prop('disabled', false).text(originalText);
+                }
+            });
+        });
+
+        // ==================== HANDLE PENGIRIMAN CHANGE ====================
+        $('input[name="pengiriman"]').on('change', function() {
+            const value = $(this).val();
+            
+            // Update style
+            $('.shipping-option').removeClass('border-green-500 bg-green-50/40 shadow-md shadow-green-500/10 border-blue-500 bg-blue-50/40 shadow-md shadow-blue-500/10')
+                               .addClass('border-gray-200 bg-white');
+            
+            if (value === 'foodsave') {
+                $(this).closest('.shipping-option')
+                    .removeClass('border-gray-200 bg-white')
+                    .addClass('border-green-500 bg-green-50/40 shadow-md shadow-green-500/10');
+                ongkir = <?= $ongkir_konsolidasi ?>;
+                $('#displayOngkir').html('Rp <?= number_format($ongkir_konsolidasi, 0, ',', '.') ?> <span class="text-xs text-gray-400 block">(FoodSave Delivery)</span>');
+            } else if (value === 'pickup') {
+                $(this).closest('.shipping-option')
+                    .removeClass('border-gray-200 bg-white')
+                    .addClass('border-blue-500 bg-blue-50/40 shadow-md shadow-blue-500/10');
+                ongkir = ongkirPickup;
+                $('#displayOngkir').html('Gratis (Pick Up) <span class="text-xs text-gray-400 block">(Ambil Sendiri)</span>');
+            }
+            
+            updateTotalDisplay();
+        });
+
+        // ==================== HANDLE PEMBAYARAN CHANGE ====================
+        $('input[name="pembayaran"]').on('change', function() {
+            $('.payment-option').removeClass('selected');
+            $(this).closest('.payment-option').addClass('selected');
+        });
+    });
+    </script>
 
 </body>
 

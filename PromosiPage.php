@@ -186,11 +186,11 @@ $produk_json = json_encode($produk_list, JSON_UNESCAPED_UNICODE);
                     ← Kembali
                 </button>
 
-                <!-- ✅ Tombol 1: Tambah ke Keranjang (Kuning) -->
-                <a id="btnAddCart" href="#"
-                    class="px-6 py-3 bg-yellow-400 text-gray-900 font-bold rounded-xl hover:bg-yellow-300 inline-flex items-center justify-center gap-2">
+                <!-- ✅ Tombol 1: Tambah ke Keranjang (Kuning) - UBAH JADI BUTTON -->
+                <button type="button" id="btnAddCart"
+                    class="px-6 py-3 bg-yellow-400 text-gray-900 font-bold rounded-xl hover:bg-yellow-300 inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                     🛒 Tambah ke Keranjang
-                </a>
+                </button>
 
                 <!-- ✅ Tombol 2: Beli Sekarang (Hijau) - Form Terpisah -->
                 <form id="formBeli" method="GET" action="HalamanTransaksi.php" class="w-full">
@@ -198,7 +198,7 @@ $produk_json = json_encode($produk_list, JSON_UNESCAPED_UNICODE);
                     <input type="hidden" name="harga" id="fHarga" />
                     <input type="hidden" name="seller" id="fSeller" />
                     <input type="hidden" name="produk_id" id="fProdukId" />
-                    <input type="hidden" name="penjual_id" id="fPenjualId" />
+                    <input type="hidden" name="id_toko" id="fIdToko" />
                     <input type="hidden" name="qty" value="1" />
 
                     <button type="submit"
