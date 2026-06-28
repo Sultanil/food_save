@@ -13,11 +13,12 @@ if (!isset($_SESSION['sudah_login']) || ($_SESSION['role'] ?? '') !== 'pembeli')
 }
 
 // ==================== DETEKSI AJAX REQUEST ====================
-$is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && 
-           strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+$is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) &&
+    strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
 // Helper function untuk return JSON response
-function jsonResponse($status, $message, $extra = []) {
+function jsonResponse($status, $message, $extra = [])
+{
     header('Content-Type: application/json');
     echo json_encode(array_merge([
         'status' => $status,
@@ -29,6 +30,33 @@ function jsonResponse($status, $message, $extra = []) {
 // ==================== AMBIL DATA USER ====================
 $user_id = $_SESSION['user_id'] ?? $_SESSION['id_user'] ?? 0;
 $kode_pos_pembeli = $_SESSION['kode_pos'] ?? '';
+
+// ==================== AMBIL ALAMAT USER ====================
+$stmt = $pdo->prepare("
+    SELECT ua.*, kp.kecamatan, kp.kelurahan 
+    FROM user_addresses ua
+    LEFT JOIN kode_pos kp ON ua.kode_pos = kp.kode_pos
+    WHERE ua.user_id = ?
+    ORDER BY ua.is_default DESC, ua.created_at DESC
+");
+$stmt->execute([$user_id]);
+$user_addresses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Ambil alamat default
+$default_address = array_filter($user_addresses, fn($a) => $a['is_default'] == 1);
+$default_address = reset($default_address) ?: ($user_addresses[0] ?? null);
+
+// Pre-fill data dari alamat default
+if ($default_address) {
+    $nama = $default_address['nama_penerima'];
+    $telepon = $default_address['telepon'];
+    $alamat = $default_address['alamat_lengkap'];
+    $kode_pos_pembeli = $default_address['kode_pos'];
+} else {
+    $nama = $_SESSION['nama_lengkap'] ?? $_SESSION['nama'] ?? '';
+    $telepon = '';
+    $alamat = '';
+}
 
 // ==================== AMBIL PAYLOAD DARI POST ====================
 $cart_items_raw = $_POST['cart_items'] ?? '';
@@ -81,7 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $kode_voucher_input = strtoupper(trim($_POST['voucher'] ?? ''));
     if (!empty($kode_voucher_input)) {
         $voucher_result = hitungDiskonVoucher($kode_voucher_input, $subtotal);
-        
+
         if ($voucher_result['valid']) {
             $diskon = $voucher_result['diskon'];
             $kode_voucher = $voucher_result['kode'];
@@ -199,7 +227,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 // Response berdasarkan AJAX atau form biasa
                 $redirect_url = "payment_summary.php?batch_id=$batch_id&total=$total_bayar&pembayaran=" . urlencode($pembayaran) . "&pengiriman=" . urlencode($pengiriman);
-                
+
                 if ($is_ajax) {
                     jsonResponse('success', '✅ Pesanan berhasil dibuat! Mengalihkan ke halaman pembayaran...', [
                         'redirect_url' => $redirect_url,
@@ -209,12 +237,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     header("Location: $redirect_url");
                     exit;
                 }
-
             } catch (PDOException $e) {
                 $pdo->rollBack();
                 $error_msg = '❌ Terjadi kesalahan saat memproses pesanan: ' . $e->getMessage();
                 error_log("Checkout error: " . $e->getMessage());
-                
+
                 if ($is_ajax) {
                     jsonResponse('error', $error_msg);
                 } else {
@@ -261,9 +288,17 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
         }
 
         @keyframes highlight-section {
-            0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5); }
-            50% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0.2); }
-            100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+            0% {
+                box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5);
+            }
+
+            50% {
+                box-shadow: 0 0 0 8px rgba(34, 197, 94, 0.2);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+            }
         }
 
         .section-highlight {
@@ -272,8 +307,11 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
 
         /* Loading spinner */
         @keyframes spin {
-            to { transform: rotate(360deg); }
+            to {
+                transform: rotate(360deg);
+            }
         }
+
         .spinner {
             animation: spin 1s linear infinite;
         }
@@ -302,8 +340,8 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
         <!-- Alert Message (untuk fallback non-AJAX) -->
         <?php if ($pesan): ?>
             <div id="fallbackMessage" class="mb-6 p-4 rounded-xl border-2 <?= $pesan_class === 'success'
-                                                            ? 'bg-green-50 border-green-200 text-green-700'
-                                                            : 'bg-red-50 border-red-200 text-red-700' ?>">
+                                                                                ? 'bg-green-50 border-green-200 text-green-700'
+                                                                                : 'bg-red-50 border-red-200 text-red-700' ?>">
                 <?= htmlspecialchars($pesan) ?>
             </div>
         <?php endif; ?>
@@ -360,25 +398,49 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                             Data Penerima
                         </h2>
 
+                        <!-- Pilih Alamat -->
+                        <?php if (!empty($user_addresses)): ?>
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Pilih Alamat Pengiriman</label>
+                                <select id="selectAlamat" onchange="pilihAlamat(this.value)"
+                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none bg-white">
+                                    <option value="">-- Pilih Alamat --</option>
+                                    <?php foreach ($user_addresses as $addr): ?>
+                                        <option value="<?= htmlspecialchars(json_encode($addr)) ?>" <?= ($default_address && $addr['id'] === $default_address['id']) ? 'selected' : '' ?>>
+                                            <?= htmlspecialchars($addr['nama_penerima']) ?> - <?= htmlspecialchars($addr['kelurahan'] ?? '') ?>, <?= htmlspecialchars($addr['kecamatan'] ?? '') ?>
+                                            <?= $addr['is_default'] ? ' ⭐' : '' ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                    <option value="new">+ Tambah Alamat Baru</option>
+                                </select>
+                                <a href="alamat_saya.php" class="text-sm text-green-600 hover:underline mt-2 inline-block">Kelola Alamat</a>
+                            </div>
+                        <?php else: ?>
+                            <div class="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                                <p class="text-sm text-amber-800 mb-2">⚠️ Anda belum memiliki alamat pengiriman.</p>
+                                <a href="alamat_saya.php" class="text-sm text-green-600 hover:underline font-medium">+ Tambah Alamat</a>
+                            </div>
+                        <?php endif; ?>
+
                         <div class="space-y-4">
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Nama Lengkap *</label>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Nama Penerima *</label>
                                 <input type="text" name="nama" value="<?= htmlspecialchars($nama) ?>" required
-                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition"
+                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none transition"
                                     placeholder="Nama Penerima">
                             </div>
 
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Nomor WhatsApp *</label>
                                 <input type="tel" name="telepon" value="<?= htmlspecialchars($telepon) ?>" required pattern="08[0-9]{8,}"
-                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition"
+                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none transition"
                                     placeholder="08xxxxxxxxxx">
                             </div>
 
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Alamat Pengiriman Lengkap *</label>
                                 <textarea name="alamat" rows="2" required
-                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none resize-none transition"
+                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none resize-none transition"
                                     placeholder="Jl. Contoh No. 123, RT/RW, Kelurahan, Kecamatan"><?= htmlspecialchars($alamat) ?></textarea>
                                 <?php if (!empty($kode_pos_pembeli)): ?>
                                     <p class="text-xs text-gray-400 mt-1">📮 Kode Pos: <strong><?= htmlspecialchars($kode_pos_pembeli) ?></strong></p>
@@ -611,138 +673,140 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
 
     <!-- jQuery untuk AJAX -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    
+
     <!-- Load JavaScript dari file terpisah -->
     <script src="assets/js/checkout_cart.js"></script>
 
     <!-- AJAX Script untuk Checkout -->
     <script>
-    $(document).ready(function() {
-        // ==================== VARIABEL GLOBAL ====================
-        const subtotal = <?= $subtotal ?>;
-        const biayaLayanan = <?= $biaya_layanan ?>;
-        let ongkir = <?= $ongkir_konsolidasi ?>;
-        let diskon = <?= $diskon ?>;
-        const ongkirPickup = 0;
+        $(document).ready(function() {
+            // ==================== VARIABEL GLOBAL ====================
+            const subtotal = <?= $subtotal ?>;
+            const biayaLayanan = <?= $biaya_layanan ?>;
+            let ongkir = <?= $ongkir_konsolidasi ?>;
+            let diskon = <?= $diskon ?>;
+            const ongkirPickup = 0;
 
-        // ==================== HELPER FUNCTIONS ====================
-        function formatRupiah(angka) {
-            return 'Rp ' + angka.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-        }
+            // ==================== HELPER FUNCTIONS ====================
+            function formatRupiah(angka) {
+                return 'Rp ' + angka.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+            }
 
-        function updateTotalDisplay() {
-            const total = subtotal + biayaLayanan + ongkir - diskon;
-            $('#displayTotal').text(formatRupiah(Math.max(0, total)));
-            $('#btnBayarText').html('Bayar Sekarang • ' + formatRupiah(Math.max(0, total)));
-        }
+            function updateTotalDisplay() {
+                const total = subtotal + biayaLayanan + ongkir - diskon;
+                $('#displayTotal').text(formatRupiah(Math.max(0, total)));
+                $('#btnBayarText').html('Bayar Sekarang • ' + formatRupiah(Math.max(0, total)));
+            }
 
-        function showMessage(type, message) {
-            const alertClass = type === 'success' 
-                ? 'bg-green-50 border-green-200 text-green-700' 
-                : 'bg-red-50 border-red-200 text-red-700';
-            
-            $('#ajaxMessage')
-                .removeClass('hidden bg-green-50 border-green-200 text-green-700 bg-red-50 border-red-200 text-red-700')
-                .addClass(alertClass)
-                .text(message)
-                .show();
-            
-            // Scroll ke atas
-            $('html, body').animate({ scrollTop: $('#ajaxMessage').offset().top - 100 }, 500);
-            
-            // Auto-hide setelah 5 detik
-            setTimeout(() => {
-                $('#ajaxMessage').fadeOut();
-            }, 5000);
-        }
+            function showMessage(type, message) {
+                const alertClass = type === 'success' ?
+                    'bg-green-50 border-green-200 text-green-700' :
+                    'bg-red-50 border-red-200 text-red-700';
 
-        function setLoading(isLoading) {
-            const btn = $('#btnBayar');
-            if (isLoading) {
-                btn.prop('disabled', true)
-                   .removeClass('bg-green-600 hover:bg-green-700')
-                   .addClass('bg-gray-400 cursor-not-allowed');
-                $('#btnBayarText').html(`
+                $('#ajaxMessage')
+                    .removeClass('hidden bg-green-50 border-green-200 text-green-700 bg-red-50 border-red-200 text-red-700')
+                    .addClass(alertClass)
+                    .text(message)
+                    .show();
+
+                // Scroll ke atas
+                $('html, body').animate({
+                    scrollTop: $('#ajaxMessage').offset().top - 100
+                }, 500);
+
+                // Auto-hide setelah 5 detik
+                setTimeout(() => {
+                    $('#ajaxMessage').fadeOut();
+                }, 5000);
+            }
+
+            function setLoading(isLoading) {
+                const btn = $('#btnBayar');
+                if (isLoading) {
+                    btn.prop('disabled', true)
+                        .removeClass('bg-green-600 hover:bg-green-700')
+                        .addClass('bg-gray-400 cursor-not-allowed');
+                    $('#btnBayarText').html(`
                     <svg class="spinner w-5 h-5 inline mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
                     Memproses pesanan...
                 `);
-            } else {
-                btn.prop('disabled', false)
-                   .removeClass('bg-gray-400 cursor-not-allowed')
-                   .addClass('bg-green-600 hover:bg-green-700');
-                updateTotalDisplay();
-            }
-        }
-
-        // ==================== HANDLE FORM SUBMIT (AJAX) ====================
-        $('#checkoutForm').on('submit', function(e) {
-            e.preventDefault();
-            
-            // Validasi client-side
-            const nama = $('input[name="nama"]').val().trim();
-            const telepon = $('input[name="telepon"]').val().trim();
-            const alamat = $('textarea[name="alamat"]').val().trim();
-            
-            if (!nama || !telepon || !alamat) {
-                showMessage('error', '⚠️ Mohon lengkapi Nama, Nomor WhatsApp, dan Alamat Pengiriman.');
-                return;
+                } else {
+                    btn.prop('disabled', false)
+                        .removeClass('bg-gray-400 cursor-not-allowed')
+                        .addClass('bg-green-600 hover:bg-green-700');
+                    updateTotalDisplay();
+                }
             }
 
-            setLoading(true);
-            $('#ajaxMessage').hide();
+            // ==================== HANDLE FORM SUBMIT (AJAX) ====================
+            $('#checkoutForm').on('submit', function(e) {
+                e.preventDefault();
 
-            $.ajax({
-                url: window.location.href,
-                type: 'POST',
-                data: $(this).serialize() + '&bayar_sekarang=1',
-                dataType: 'json',
-                headers: {
-                    'X-Requested-With': 'XMLHttpRequest'
-                },
-                success: function(response) {
-                    if (response.status === 'success') {
-                        showMessage('success', response.message);
-                        
-                        // Redirect ke halaman pembayaran
-                        setTimeout(function() {
-                            window.location.href = response.redirect_url;
-                        }, 1500);
-                    } else {
-                        showMessage('error', response.message);
+                // Validasi client-side
+                const nama = $('input[name="nama"]').val().trim();
+                const telepon = $('input[name="telepon"]').val().trim();
+                const alamat = $('textarea[name="alamat"]').val().trim();
+
+                if (!nama || !telepon || !alamat) {
+                    showMessage('error', '⚠️ Mohon lengkapi Nama, Nomor WhatsApp, dan Alamat Pengiriman.');
+                    return;
+                }
+
+                setLoading(true);
+                $('#ajaxMessage').hide();
+
+                $.ajax({
+                    url: window.location.href,
+                    type: 'POST',
+                    data: $(this).serialize() + '&bayar_sekarang=1',
+                    dataType: 'json',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            showMessage('success', response.message);
+
+                            // Redirect ke halaman pembayaran
+                            setTimeout(function() {
+                                window.location.href = response.redirect_url;
+                            }, 1500);
+                        } else {
+                            showMessage('error', response.message);
+                            setLoading(false);
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        console.error('AJAX Error:', error);
+                        console.error('Response:', xhr.responseText);
+
+                        let errorMsg = '❌ Terjadi kesalahan sistem.';
+                        try {
+                            const response = JSON.parse(xhr.responseText);
+                            if (response.message) errorMsg = response.message;
+                        } catch (e) {}
+
+                        showMessage('error', errorMsg);
                         setLoading(false);
                     }
-                },
-                error: function(xhr, status, error) {
-                    console.error('AJAX Error:', error);
-                    console.error('Response:', xhr.responseText);
-                    
-                    let errorMsg = '❌ Terjadi kesalahan sistem.';
-                    try {
-                        const response = JSON.parse(xhr.responseText);
-                        if (response.message) errorMsg = response.message;
-                    } catch(e) {}
-                    
-                    showMessage('error', errorMsg);
-                    setLoading(false);
-                }
+                });
             });
-        });
 
-        // ==================== HANDLE APPLY VOUCHER (AJAX) ====================
-        $('#btnApplyVoucher').on('click', function() {
-            const btn = $(this);
-            const voucherCode = $('#voucherInput').val().trim();
-            
-            if (!voucherCode) {
-                showMessage('error', 'Masukkan kode voucher terlebih dahulu!');
-                return;
-            }
-            
-            const originalText = btn.text();
-            btn.prop('disabled', true).html(`
+            // ==================== HANDLE APPLY VOUCHER (AJAX) ====================
+            $('#btnApplyVoucher').on('click', function() {
+                const btn = $(this);
+                const voucherCode = $('#voucherInput').val().trim();
+
+                if (!voucherCode) {
+                    showMessage('error', 'Masukkan kode voucher terlebih dahulu!');
+                    return;
+                }
+
+                const originalText = btn.text();
+                btn.prop('disabled', true).html(`
                 <svg class="spinner w-4 h-4 inline mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                     <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -750,88 +814,110 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                 Memproses...
             `);
 
-            $.ajax({
-                url: window.location.href,
-                type: 'POST',
-                data: {
-                    apply_voucher: '1',
-                    voucher: voucherCode,
-                    cart_items: $('input[name="cart_items"]').val(),
-                    subtotal: $('input[name="subtotal"]').val(),
-                    pengiriman: $('input[name="pengiriman"]:checked').val()
-                },
-                dataType: 'json',
-                headers: {
-                    'X-Requested-With': 'XMLHttpRequest'
-                },
-                success: function(response) {
-                    if (response.status === 'success') {
-                        // Update diskon
-                        diskon = response.diskon;
-                        
-                        // Update tampilan
-                        $('#displayDiskon').text('- ' + response.formatted_diskon);
-                        $('#displayDiskonRow').show();
-                        $('#displayTotal').text(response.formatted_total);
-                        
-                        // Update status voucher
-                        $('#voucherStatus').html(`
+                $.ajax({
+                    url: window.location.href,
+                    type: 'POST',
+                    data: {
+                        apply_voucher: '1',
+                        voucher: voucherCode,
+                        cart_items: $('input[name="cart_items"]').val(),
+                        subtotal: $('input[name="subtotal"]').val(),
+                        pengiriman: $('input[name="pengiriman"]:checked').val()
+                    },
+                    dataType: 'json',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            // Update diskon
+                            diskon = response.diskon;
+
+                            // Update tampilan
+                            $('#displayDiskon').text('- ' + response.formatted_diskon);
+                            $('#displayDiskonRow').show();
+                            $('#displayTotal').text(response.formatted_total);
+
+                            // Update status voucher
+                            $('#voucherStatus').html(`
                             <p class="text-xs text-green-600 mt-2 flex items-center gap-1">
                                 ✅ Voucher <strong>${response.kode_voucher}</strong> aktif: Potongan ${response.formatted_diskon}
                             </p>
                         `);
-                        
-                        // Update tombol bayar
-                        updateTotalDisplay();
-                        
-                        showMessage('success', response.message);
-                    } else {
-                        showMessage('error', response.message);
-                        $('#voucherStatus').html(`
+
+                            // Update tombol bayar
+                            updateTotalDisplay();
+
+                            showMessage('success', response.message);
+                        } else {
+                            showMessage('error', response.message);
+                            $('#voucherStatus').html(`
                             <p class="text-xs text-red-500 mt-2">❌ ${response.message}</p>
                         `);
+                        }
+
+                        btn.prop('disabled', false).text(originalText);
+                    },
+                    error: function() {
+                        showMessage('error', '❌ Terjadi kesalahan. Silakan coba lagi.');
+                        btn.prop('disabled', false).text(originalText);
                     }
-                    
-                    btn.prop('disabled', false).text(originalText);
-                },
-                error: function() {
-                    showMessage('error', '❌ Terjadi kesalahan. Silakan coba lagi.');
-                    btn.prop('disabled', false).text(originalText);
+                });
+            });
+
+            // ==================== HANDLE PENGIRIMAN CHANGE ====================
+            $('input[name="pengiriman"]').on('change', function() {
+                const value = $(this).val();
+
+                // Update style
+                $('.shipping-option').removeClass('border-green-500 bg-green-50/40 shadow-md shadow-green-500/10 border-blue-500 bg-blue-50/40 shadow-md shadow-blue-500/10')
+                    .addClass('border-gray-200 bg-white');
+
+                if (value === 'foodsave') {
+                    $(this).closest('.shipping-option')
+                        .removeClass('border-gray-200 bg-white')
+                        .addClass('border-green-500 bg-green-50/40 shadow-md shadow-green-500/10');
+                    ongkir = <?= $ongkir_konsolidasi ?>;
+                    $('#displayOngkir').html('Rp <?= number_format($ongkir_konsolidasi, 0, ',', '.') ?> <span class="text-xs text-gray-400 block">(FoodSave Delivery)</span>');
+                } else if (value === 'pickup') {
+                    $(this).closest('.shipping-option')
+                        .removeClass('border-gray-200 bg-white')
+                        .addClass('border-blue-500 bg-blue-50/40 shadow-md shadow-blue-500/10');
+                    ongkir = ongkirPickup;
+                    $('#displayOngkir').html('Gratis (Pick Up) <span class="text-xs text-gray-400 block">(Ambil Sendiri)</span>');
                 }
+
+                updateTotalDisplay();
+            });
+
+            // ==================== HANDLE PEMBAYARAN CHANGE ====================
+            $('input[name="pembayaran"]').on('change', function() {
+                $('.payment-option').removeClass('selected');
+                $(this).closest('.payment-option').addClass('selected');
             });
         });
-
-        // ==================== HANDLE PENGIRIMAN CHANGE ====================
-        $('input[name="pengiriman"]').on('change', function() {
-            const value = $(this).val();
-            
-            // Update style
-            $('.shipping-option').removeClass('border-green-500 bg-green-50/40 shadow-md shadow-green-500/10 border-blue-500 bg-blue-50/40 shadow-md shadow-blue-500/10')
-                               .addClass('border-gray-200 bg-white');
-            
-            if (value === 'foodsave') {
-                $(this).closest('.shipping-option')
-                    .removeClass('border-gray-200 bg-white')
-                    .addClass('border-green-500 bg-green-50/40 shadow-md shadow-green-500/10');
-                ongkir = <?= $ongkir_konsolidasi ?>;
-                $('#displayOngkir').html('Rp <?= number_format($ongkir_konsolidasi, 0, ',', '.') ?> <span class="text-xs text-gray-400 block">(FoodSave Delivery)</span>');
-            } else if (value === 'pickup') {
-                $(this).closest('.shipping-option')
-                    .removeClass('border-gray-200 bg-white')
-                    .addClass('border-blue-500 bg-blue-50/40 shadow-md shadow-blue-500/10');
-                ongkir = ongkirPickup;
-                $('#displayOngkir').html('Gratis (Pick Up) <span class="text-xs text-gray-400 block">(Ambil Sendiri)</span>');
+        // Fungsi pilih alamat dari dropdown
+        function pilihAlamat(jsonData) {
+            if (jsonData === 'new') {
+                window.location.href = 'alamat_saya.php';
+                return;
             }
-            
-            updateTotalDisplay();
-        });
 
-        // ==================== HANDLE PEMBAYARAN CHANGE ====================
-        $('input[name="pembayaran"]').on('change', function() {
-            $('.payment-option').removeClass('selected');
-            $(this).closest('.payment-option').addClass('selected');
-        });
-    });
+            if (!jsonData) return;
+
+            const alamat = JSON.parse(jsonData);
+
+            // Fill form dengan data alamat
+            document.querySelector('input[name="nama"]').value = alamat.nama_penerima;
+            document.querySelector('input[name="telepon"]').value = alamat.telepon;
+            document.querySelector('textarea[name="alamat"]').value = alamat.alamat_lengkap;
+
+            // Update kode pos (jika ada elemennya)
+            const kodePosElement = document.querySelector('p.text-xs.text-gray-400');
+            if (kodePosElement && alamat.kode_pos) {
+                kodePosElement.innerHTML = `📮 Kode Pos: <strong>${alamat.kode_pos}</strong>`;
+            }
+        }
     </script>
 
 </body>

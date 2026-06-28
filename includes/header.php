@@ -164,7 +164,7 @@ $cart_badge_count = $cart_badge_count ?? 0;
                                 <i class="fa-solid fa-chevron-down text-xs text-gray-400 transition-transform group-hover:rotate-180"></i>
                             </button>
                             <div class="absolute right-0 mt-2 w-52 bg-white/90 backdrop-blur-md rounded-2xl shadow-xl border border-white/20 py-2 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
-                                <a href="profil.php" class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 hover:text-brand transition">
+                                <a href="alamat_saya.php" class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 hover:text-brand transition">
                                     <i class="fa-regular fa-user"></i> Profil
                                 </a>
                                 <?php if (isset($_SESSION['role'])): ?>
