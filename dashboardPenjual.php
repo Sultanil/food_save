@@ -2,6 +2,7 @@
 session_start();
 require_once 'config/database.php';
 require_once 'includes/session_check.php';
+require_once 'includes/payment_methods.php';
 
 // 🔐 SECURITY CHECK
 if (!isset($_SESSION['sudah_login']) || ($_SESSION['role'] ?? '') !== 'penjual') {
@@ -13,9 +14,13 @@ if (!isset($_SESSION['sudah_login']) || ($_SESSION['role'] ?? '') !== 'penjual')
 $user_id = $_SESSION['user_id'] ?? $_SESSION['id_user'] ?? 0;
 
 // ==================== AMBIL DATA PENJUAL ====================
-$stmt = $pdo->prepare("SELECT id, nama_toko, status_verifikasi, alasan_penolakan FROM penjual WHERE user_id = ?");
-$stmt->execute([$user_id]);
-$penjual = $stmt->fetch(PDO::FETCH_ASSOC);
+try {
+    $stmt = $pdo->prepare("SELECT id, nama_toko, status_verifikasi, alasan_penolakan FROM penjual WHERE user_id = ?");
+    $stmt->execute([$user_id]);
+    $penjual = $stmt->fetch(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    die("Error: " . $e->getMessage());
+}
 
 if (!$penjual) {
     header("Location: lengkapi_toko.php");
@@ -27,14 +32,56 @@ $status_verifikasi = $penjual['status_verifikasi'] ?? 'pending';
 $alasan_penolakan = $penjual['alasan_penolakan'] ?? '';
 
 // ==================== AMBIL PRODUK PENJUAL ====================
-$stmt = $pdo->prepare("SELECT id, nama_produk, harga_asli, harga_diskon, stok, satuan, gambar_url, status FROM produk WHERE penjual_id = ? ORDER BY created_at DESC");
-$stmt->execute([$penjual_id]);
-$produk_list = $stmt->fetchAll(PDO::FETCH_ASSOC);
+try {
+    $stmt = $pdo->prepare("SELECT id, nama_produk, harga_asli, harga_diskon, stok, satuan, gambar_url, status FROM produk WHERE penjual_id = ? ORDER BY created_at DESC");
+    $stmt->execute([$penjual_id]);
+    $produk_list = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    $produk_list = [];
+}
 
 // ==================== HITUNG STATISTIK ====================
-$stmt_stats = $pdo->prepare("SELECT COUNT(*) as total, COALESCE(SUM(stok), 0) as total_stok FROM produk WHERE penjual_id = ?");
-$stmt_stats->execute([$penjual_id]);
-$stats = $stmt_stats->fetch(PDO::FETCH_ASSOC);
+try {
+    $stmt_stats = $pdo->prepare("SELECT COUNT(*) as total, COALESCE(SUM(stok), 0) as total_stok FROM produk WHERE penjual_id = ?");
+    $stmt_stats->execute([$penjual_id]);
+    $stats = $stmt_stats->fetch(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    $stats = ['total' => 0, 'total_stok' => 0];
+}
+
+// ==================== HITUNG PESANAN PENDING ====================
+try {
+    $stmt_orders = $pdo->prepare("
+        SELECT COUNT(*) as total_pending 
+        FROM transaksi 
+        WHERE penjual_id = ? AND status IN ('pending', 'dibayar')
+    ");
+    $stmt_orders->execute([$penjual_id]);
+    $orders_stats = $stmt_orders->fetch(PDO::FETCH_ASSOC);
+    $total_pending_orders = $orders_stats['total_pending'] ?? 0;
+} catch (PDOException $e) {
+    $total_pending_orders = 0;
+}
+
+// ==================== CEK PAYMENT METHODS ====================
+$payment_methods_count = 0;
+if ($status_verifikasi === 'disetujui') {
+    $payment_methods_count = countSellerPaymentMethods($pdo, $penjual_id);
+}
+
+// ==================== PESAN DARI REDIRECT ====================
+$success_msg = '';
+if (isset($_GET['msg'])) {
+    if ($_GET['msg'] === 'verifikasi_submitted') {
+        $success_msg = "✅ Verifikasi toko berhasil disubmit! Tim admin akan meninjau dalam 1x24 jam.";
+    } elseif ($_GET['msg'] === 'updated') {
+        $success_msg = "✅ Produk berhasil diperbarui!";
+    } elseif ($_GET['msg'] === 'deactivated') {
+        $success_msg = "✅ Produk berhasil dinonaktifkan!";
+    } elseif ($_GET['msg'] === 'deleted') {
+        $success_msg = "✅ Metode pembayaran berhasil dihapus!";
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -57,10 +104,27 @@ $stats = $stmt_stats->fetch(PDO::FETCH_ASSOC);
         <main class="flex-1 p-6 md:p-8">
 
             <!-- HEADER -->
-            <div class="mb-6">
-                <h2 class="text-3xl font-bold text-gray-900">Dashboard <?= htmlspecialchars($penjual['nama_toko']) ?> 👋</h2>
-                <p class="text-gray-500 mt-1">Kelola produk dan pantau penjualan Anda</p>
+            <div class="mb-6 flex justify-between items-start">
+                <div>
+                    <h2 class="text-3xl font-bold text-gray-900">Dashboard <?= htmlspecialchars($penjual['nama_toko']) ?> 👋</h2>
+                    <p class="text-gray-500 mt-1">Kelola produk dan pantau penjualan Anda</p>
+                </div>
+                <?php if ($total_pending_orders > 0 && $status_verifikasi === 'disetujui'): ?>
+                    <a href="pesanan.php" class="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg transition shadow animate-pulse">
+                        🔔 <?= $total_pending_orders ?> Pesanan Baru
+                    </a>
+                <?php endif; ?>
             </div>
+
+            <!-- SUCCESS MESSAGE -->
+            <?php if ($success_msg): ?>
+                <div class="bg-green-50 border-l-4 border-green-500 text-green-800 p-4 rounded-xl shadow-sm mb-6 flex items-start gap-3">
+                    <span class="text-2xl">✅</span>
+                    <div>
+                        <p class="text-sm"><?= $success_msg ?></p>
+                    </div>
+                </div>
+            <?php endif; ?>
 
             <!-- STATUS VERIFIKASI BANNER -->
             <?php if ($status_verifikasi === 'pending'): ?>
@@ -80,6 +144,20 @@ $stats = $stmt_stats->fetch(PDO::FETCH_ASSOC);
                         <p class="text-sm font-semibold mt-1">Alasan Penolakan: <?= htmlspecialchars($alasan_penolakan) ?></p>
                         <a href="lengkapi_toko.php" class="inline-block mt-3 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg transition shadow">
                             ✏️ Perbaiki Profil Toko
+                        </a>
+                    </div>
+                </div>
+            <?php endif; ?>
+
+            <!-- WARNING: BELUM SETUP PAYMENT METHODS -->
+            <?php if ($status_verifikasi === 'disetujui' && $payment_methods_count === 0): ?>
+                <div class="bg-amber-50 border-l-4 border-amber-500 text-amber-800 p-4 rounded-xl shadow-sm mb-6 flex items-start gap-3">
+                    <span class="text-2xl">⚠️</span>
+                    <div class="flex-1">
+                        <h4 class="font-bold text-amber-900">Belum Ada Metode Pembayaran</h4>
+                        <p class="text-sm mt-1">Anda perlu menambahkan minimal 1 rekening bank agar pembeli bisa melakukan pembayaran.</p>
+                        <a href="setup_payment.php" class="inline-block mt-3 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-lg transition shadow">
+                            💳 Setup Payment Methods
                         </a>
                     </div>
                 </div>
@@ -125,6 +203,34 @@ $stats = $stmt_stats->fetch(PDO::FETCH_ASSOC);
                     </div>
                 </div>
             </div>
+
+            <!-- QUICK ACTIONS (HANYA UNTUK TOKO DISETUJUI) -->
+            <?php if ($status_verifikasi === 'disetujui'): ?>
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-8">
+                    <h3 class="font-semibold text-lg text-gray-900 mb-4">⚡ Aksi Cepat</h3>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <a href="tambah_produk.php" class="flex flex-col items-center p-4 bg-blue-50 hover:bg-blue-100 rounded-xl transition group">
+                            <span class="text-3xl mb-2 group-hover:scale-110 transition-transform">➕</span>
+                            <span class="text-sm font-medium text-gray-700">Tambah Produk</span>
+                        </a>
+                        <a href="pesanan.php" class="flex flex-col items-center p-4 bg-orange-50 hover:bg-orange-100 rounded-xl transition group relative">
+                            <span class="text-3xl mb-2 group-hover:scale-110 transition-transform">📬</span>
+                            <span class="text-sm font-medium text-gray-700">Pesanan Masuk</span>
+                            <?php if ($total_pending_orders > 0): ?>
+                                <span class="absolute top-2 right-2 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full"><?= $total_pending_orders ?></span>
+                            <?php endif; ?>
+                        </a>
+                        <a href="setup_payment.php" class="flex flex-col items-center p-4 bg-green-50 hover:bg-green-100 rounded-xl transition group">
+                            <span class="text-3xl mb-2 group-hover:scale-110 transition-transform">💳</span>
+                            <span class="text-sm font-medium text-gray-700">Payment Methods</span>
+                        </a>
+                        <a href="riwayat_penjualan.php" class="flex flex-col items-center p-4 bg-purple-50 hover:bg-purple-100 rounded-xl transition group">
+                            <span class="text-3xl mb-2 group-hover:scale-110 transition-transform">📈</span>
+                            <span class="text-sm font-medium text-gray-700">Riwayat Penjualan</span>
+                        </a>
+                    </div>
+                </div>
+            <?php endif; ?>
 
             <!-- PRODUK SECTION -->
             <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
