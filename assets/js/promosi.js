@@ -4,12 +4,12 @@ let currentTokoId = null;
 let currentProduct = null;
 
 // Render daftar toko
+// Render daftar toko
 function renderToko() {
     const grid = document.getElementById('grid-toko');
     if (!grid) return;
 
     console.log('📦 Data TOKO:', TOKO);
-    console.log('📦 Data PRODUK:', PRODUK);
 
     if (!TOKO || TOKO.length === 0) {
         grid.innerHTML = `
@@ -21,24 +21,62 @@ function renderToko() {
         return;
     }
 
-    grid.innerHTML = TOKO.map(toko => `
-        <div class="card bg-white rounded-2xl shadow-md p-6 cursor-pointer border-2 border-transparent hover:border-green-500"
+    // Warna untuk fallback
+    const colors = ['bg-green-500', 'bg-blue-500', 'bg-purple-500', 'bg-yellow-500', 'bg-pink-500', 'bg-indigo-500'];
+
+    let html = '';
+
+    TOKO.forEach((toko, index) => {
+        console.log(`\n🏪 Toko #${index}: ${toko.nama_toko}`);
+        console.log('   foto_profil:', toko.foto_profil);
+
+        // Generate inisial
+        const initial = toko.nama_toko.charAt(0).toUpperCase();
+        const colorClass = colors[toko.penjual_id % colors.length];
+
+        // Cek apakah ada foto
+        const hasPhoto = toko.foto_profil && toko.foto_profil.toString().trim() !== '';
+
+        // Buat HTML untuk avatar
+        let avatarHtml = '';
+        if (hasPhoto) {
+            avatarHtml = `
+                <div class="w-16 h-16 rounded-2xl overflow-hidden flex-shrink-0 bg-white border border-gray-200">
+                    <img src="${toko.foto_profil}" 
+                         alt="${toko.nama_toko}" 
+                         class="w-full h-full object-cover"
+                         onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'w-full h-full ${colorClass} flex items-center justify-center text-white text-2xl font-bold\\'>${initial}</div>';">
+                </div>`;
+        } else {
+            avatarHtml = `
+                <div class="w-16 h-16 rounded-2xl flex-shrink-0 ${colorClass} flex items-center justify-center text-white text-2xl font-bold">
+                    ${initial}
+                </div>`;
+        }
+
+        html += `
+        <div class="card bg-white rounded-2xl shadow-md p-6 cursor-pointer border-2 border-transparent hover:border-green-500 transition-all duration-300"
              onclick="pilihToko('${toko.penjual_id}')">
-            <div class="flex items-center justify-between mb-4">
-                <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center text-3xl">
-                    🏪
-                </div>
+            <div class="flex items-start justify-between mb-4">
+                ${avatarHtml}
                 <span class="bg-green-100 text-green-700 text-xs font-bold px-3 py-1 rounded-full">
                     ${toko.total_produk} Produk
                 </span>
             </div>
             <h3 class="text-xl font-bold text-gray-800 mb-2">${toko.nama_toko}</h3>
-            <p class="text-gray-500 text-sm mb-4">📍 ${toko.kota}</p>
-            <button class="w-full py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg text-sm">
-                Lihat Produk →
+            <p class="text-gray-500 text-sm mb-4 flex items-center gap-1">
+                <i class="fas fa-map-marker-alt text-red-400"></i>
+                ${toko.kota}
+            </p>
+            <button class="w-full py-2.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl text-sm transition shadow-md hover:shadow-lg">
+                Lihat Produk <i class="fas fa-arrow-right ml-1"></i>
             </button>
         </div>
-    `).join('');
+        `;
+    });
+
+    grid.innerHTML = html;
+    console.log('✅ Grid toko berhasil di-render dengan', TOKO.length, 'toko');
 }
 
 // Pilih toko & tampilkan produk
@@ -143,7 +181,7 @@ function openDetail(p) {
         document.getElementById('fProduk').value = p.name;
         document.getElementById('fHarga').value = p.harga_raw;
         document.getElementById('fSeller').value = p.seller;
-        document.getElementById('fProdukId').value = p.produk_id || p.id; // ✅ FIXED: p.id bukan produk.id
+        document.getElementById('fProdukId').value = p.produk_id || p.id;
         document.getElementById('fIdToko').value = p.penjual_id;
     }
 
@@ -176,63 +214,63 @@ function tambahKeKeranjang(produk_id, id_toko, btnElement) {
         },
         body: `produk_id=${produk_id}&id_toko=${id_toko}`
     })
-    .then(response => response.json())
-    .then(data => {
-        if (data.status === 'success') {
-            // Update badge keranjang di navbar
-            const badge = document.querySelector('.cart-badge-count');
-            if (badge) {
-                badge.textContent = data.total_items;
-                badge.classList.add('animate-bounce');
-                setTimeout(() => badge.classList.remove('animate-bounce'), 1000);
-            }
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                // Update badge keranjang di navbar
+                const badge = document.querySelector('.cart-badge-count');
+                if (badge) {
+                    badge.textContent = data.total_items;
+                    badge.classList.add('animate-bounce');
+                    setTimeout(() => badge.classList.remove('animate-bounce'), 1000);
+                }
 
-            // Tampilkan notifikasi
-            if (data.cart_cleared) {
-                alert('⚠️ ' + data.message);
+                // Tampilkan notifikasi
+                if (data.cart_cleared) {
+                    alert('⚠️ ' + data.message);
+                } else {
+                    alert('✅ ' + data.message);
+                }
+
+                // Update tombol
+                btn.innerHTML = '✅';
+                setTimeout(() => {
+                    btn.innerHTML = originalHTML;
+                    btn.disabled = false;
+                }, 1500);
+
             } else {
-                alert('✅ ' + data.message);
-            }
-
-            // Update tombol
-            btn.innerHTML = '✅';
-            setTimeout(() => {
+                alert('❌ Error: ' + data.message);
                 btn.innerHTML = originalHTML;
                 btn.disabled = false;
-            }, 1500);
-
-        } else {
-            alert('❌ Error: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('❌ Terjadi kesalahan sistem.');
             btn.innerHTML = originalHTML;
             btn.disabled = false;
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('❌ Terjadi kesalahan sistem.');
-        btn.innerHTML = originalHTML;
-        btn.disabled = false;
-    });
+        });
 }
 
 // ═══ EVENT LISTENER untuk tombol di detail-page ═══
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     renderToko();
-    
+
     // Event listener untuk tombol di detail-page (kalau ada)
     const btnAddCart = document.getElementById('btnAddCart');
     if (btnAddCart) {
-        btnAddCart.addEventListener('click', function(e) {
+        btnAddCart.addEventListener('click', function (e) {
             e.preventDefault();
-            
+
             const produk_id = document.getElementById('fProdukId')?.value;
-            const id_toko = document.getElementById('fIdToko')?.value; // ✅ FIXED: fIdToko bukan fPenjualId
-            
+            const id_toko = document.getElementById('fIdToko')?.value;
+
             if (!produk_id || !id_toko) {
                 alert('❌ Data produk tidak valid!');
                 return;
             }
-            
+
             tambahKeKeranjang(produk_id, id_toko, this);
         });
     }

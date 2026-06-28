@@ -22,17 +22,17 @@ $cek->execute([$user_id]);
 $toko = $cek->fetch(PDO::FETCH_ASSOC);
 
 if ($toko) {
-    // Jika sudah disetujui atau sedang pending, jangan izinkan edit, langsung ke dashboard
+    // Jika sudah disetujui atau sedang pending, jangan izinkan edit
     if ($toko['status_verifikasi'] === 'disetujui' || $toko['status_verifikasi'] === 'pending') {
         header("Location: dashboardPenjual.php");
         exit;
     }
-    // Jika 'ditolak', biarkan penjual berada di halaman ini untuk melakukan resubmission
+    // Jika 'ditolak', biarkan penjual berada di halaman ini untuk resubmission
 }
 
-// Proses form submit
+// ==================== PROSES FORM SUBMIT ====================
 if (isset($_POST['submit'])) {
-    // Ambil input (TIDAK PERLU escape karena pakai prepared statement)
+    // Ambil input
     $nama_toko = trim($_POST['nama_toko'] ?? '');
     $kota = trim($_POST['kota'] ?? '');
     $alamat = trim($_POST['alamat'] ?? '');
@@ -40,9 +40,9 @@ if (isset($_POST['submit'])) {
     $nik = trim($_POST['nik'] ?? '');
     $kode_pos = trim($_POST['kode_pos'] ?? '');
 
-    // Upload Gambar KTP
+    // ==================== UPLOAD FOTO KTP ====================
     $foto_ktp = $toko['foto_ktp'] ?? '';
-    if (isset($_FILES['foto_ktp']) && $_FILES['foto_ktp']['error'] === 0) {
+    if (isset($_FILES['foto_ktp']) && $_FILES['foto_ktp']['error'] === UPLOAD_ERR_OK) {
         $target_dir = "uploads/ktp/";
         if (!file_exists($target_dir)) {
             mkdir($target_dir, 0777, true);
@@ -61,38 +61,86 @@ if (isset($_POST['submit'])) {
         }
     }
 
-    // Validasi input
-    if (empty($nama_toko) || empty($kota) || empty($nik) || empty($kode_pos)) {
-        $error = "Nama toko, kota, NIK, dan kode pos wajib diisi!";
-    } elseif (strlen($nik) !== 16 || !is_numeric($nik)) {
-        $error = "NIK harus terdiri dari 16 digit angka!";
-    } elseif (empty($foto_ktp)) {
-        $error = "Foto KTP wajib diunggah!";
-    } else {
+    // ==================== UPLOAD FOTO PROFIL TOKO ====================
+    $foto_profil = $toko['foto_profil'] ?? '';
+    if (isset($_FILES['foto_profil']) && $_FILES['foto_profil']['error'] === UPLOAD_ERR_OK) {
+        $file = $_FILES['foto_profil'];
+        
+        // Validasi tipe file
+        $allowed_types = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
+        if (!in_array($file['type'], $allowed_types)) {
+            $error = "Format foto tidak valid! Gunakan JPG, PNG, atau WEBP.";
+        }
+        
+        // Validasi ukuran (Maks 2MB)
+        if ($file['size'] > 2 * 1024 * 1024) {
+            $error = "Ukuran foto terlalu besar! Maksimal 2MB.";
+        }
+        
+        // Jika validasi lolos, upload file
+        if (empty($error)) {
+            $target_dir = "uploads/profil_toko/";
+            if (!file_exists($target_dir)) {
+                mkdir($target_dir, 0777, true);
+            }
+            
+            $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+            $new_filename = "toko_" . $user_id . "_" . time() . "_" . uniqid() . "." . $ext;
+            $target_file = $target_dir . $new_filename;
+            
+            if (move_uploaded_file($file['tmp_name'], $target_file)) {
+                // Hapus file lama jika ada
+                if (!empty($toko['foto_profil']) && file_exists($toko['foto_profil'])) {
+                    unlink($toko['foto_profil']);
+                }
+                $foto_profil = $target_file;
+            } else {
+                $error = "Gagal mengupload foto profil.";
+            }
+        }
+    }
+
+    // ==================== VALIDASI INPUT ====================
+    if (empty($error)) {
+        if (empty($nama_toko) || empty($kota) || empty($nik) || empty($kode_pos)) {
+            $error = "Nama toko, kota, NIK, dan kode pos wajib diisi!";
+        } elseif (strlen($nik) !== 16 || !is_numeric($nik)) {
+            $error = "NIK harus terdiri dari 16 digit angka!";
+        } elseif (empty($foto_ktp)) {
+            $error = "Foto KTP wajib diunggah!";
+        }
+    }
+
+    // ==================== SIMPAN KE DATABASE ====================
+    if (empty($error)) {
         try {
             if ($toko) {
-                // Resubmit / UPDATE data toko yang ditolak
-                $stmt = $pdo->prepare("UPDATE penjual SET nama_toko = ?, kota = ?, alamat = ?, no_telp = ?, nik = ?, foto_ktp = ?, kode_pos = ?, status_verifikasi = 'pending', alasan_penolakan = NULL WHERE user_id = ?");
-                $stmt->execute([$nama_toko, $kota, $alamat, $no_telp, $nik, $foto_ktp, $kode_pos, $user_id]);
+                // UPDATE (Resubmit setelah ditolak)
+                $stmt = $pdo->prepare("
+                    UPDATE penjual 
+                    SET nama_toko = ?, foto_profil = ?, kota = ?, alamat = ?, no_telp = ?, nik = ?, foto_ktp = ?, kode_pos = ?, status_verifikasi = 'pending', alasan_penolakan = NULL 
+                    WHERE user_id = ?
+                ");
+                $stmt->execute([$nama_toko, $foto_profil, $kota, $alamat, $no_telp, $nik, $foto_ktp, $kode_pos, $user_id]);
             } else {
-                // Pendaftaran Baru (INSERT)
-                $stmt = $pdo->prepare("INSERT INTO penjual (user_id, nama_toko, kota, alamat, no_telp, nik, foto_ktp, kode_pos, status_verifikasi) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')");
-                $stmt->execute([$user_id, $nama_toko, $kota, $alamat, $no_telp, $nik, $foto_ktp, $kode_pos]);
+                // INSERT (Pendaftaran baru)
+                $stmt = $pdo->prepare("
+                    INSERT INTO penjual (user_id, nama_toko, foto_profil, kota, kode_pos, alamat, no_telp, nik, foto_ktp, status_verifikasi) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                ");
+                $stmt->execute([$user_id, $nama_toko, $foto_profil, $kota, $kode_pos, $alamat, $no_telp, $nik, $foto_ktp]);
             }
-
-            // Kode baru (Redirect ke Step 2):
-            if ($stmt->execute()) {
-                $_SESSION['toko_step_1_done'] = true;
-                header("Location: setup_payment.php");
-                exit;
-            }
+            
+            $_SESSION['toko_step_1_done'] = true;
+            header("Location: setup_payment.php");
+            exit;
+            
         } catch (PDOException $e) {
             $error = "Gagal menyimpan data toko: " . $e->getMessage();
         }
     }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="id">
 
@@ -134,6 +182,41 @@ if (isset($_POST['submit'])) {
         <?php endif; ?>
 
         <form method="POST" enctype="multipart/form-data" class="space-y-4">
+            
+            <!-- Upload Foto Profil Toko -->
+            <div class="mb-6">
+                <label class="block text-sm font-semibold text-gray-700 mb-2">Foto Profil Toko / Logo</label>
+                <div class="flex items-center gap-6">
+                    <!-- Preview Area -->
+                    <div class="w-32 h-32 rounded-2xl bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative group">
+                        <?php if (!empty($toko['foto_profil']) && file_exists($toko['foto_profil'])): ?>
+                            <img id="previewFotoToko" src="<?= htmlspecialchars($toko['foto_profil']) ?>" class="w-full h-full object-cover">
+                        <?php else: ?>
+                            <img id="previewFotoToko" src="" class="w-full h-full object-cover hidden">
+                            <div id="placeholderFotoToko" class="text-center p-2">
+                                <div class="text-3xl mb-1">🏪</div>
+                                <p class="text-[10px] text-gray-500 font-medium">Belum ada foto</p>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                    
+                    <!-- Upload Button -->
+                    <div class="flex-1">
+                        <input type="file" name="foto_profil" id="foto_profil" accept="image/*" class="hidden" onchange="previewImage(this)">
+                        <label for="foto_profil" class="inline-block px-5 py-2.5 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-xl cursor-pointer transition shadow-sm">
+                            📷 Pilih Foto
+                        </label>
+                        <p class="text-xs text-gray-500 mt-2">
+                            JPG, PNG, atau WEBP. Maksimal 2MB.<br>
+                            <span class="text-gray-400">Disarankan ukuran persegi (1:1) agar terlihat rapi.</span>
+                        </p>
+                        <?php if (!empty($toko['foto_profil'])): ?>
+                            <p class="text-xs text-gray-400 mt-1">✓ Foto sudah terunggah (Pilih file baru jika ingin mengganti)</p>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+
             <div>
                 <label class="block text-sm font-semibold text-gray-700 mb-1">
                     Nama Toko <span class="text-red-500">*</span>
@@ -161,7 +244,11 @@ if (isset($_POST['submit'])) {
                 <select name="kode_pos" required
                     class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none bg-white transition">
                     <option value="">Pilih Kecamatan & Kelurahan</option>
-                    <?php while ($kp = $kode_pos_list->fetch(PDO::FETCH_ASSOC)): ?>
+                    <?php 
+                    // Reset pointer untuk loop kedua
+                    $kode_pos_list->execute();
+                    while ($kp = $kode_pos_list->fetch(PDO::FETCH_ASSOC)): 
+                    ?>
                         <option value="<?= htmlspecialchars($kp['kode_pos']) ?>" <?= (isset($toko['kode_pos']) && $toko['kode_pos'] == $kp['kode_pos']) ? 'selected' : '' ?>>
                             <?= htmlspecialchars($kp['kecamatan']) ?> - <?= htmlspecialchars($kp['kelurahan']) ?> (<?= $kp['kode_pos'] ?>)
                         </option>
@@ -225,6 +312,26 @@ if (isset($_POST['submit'])) {
             <a href="logout.php" class="text-sm text-red-500 hover:underline">Logout</a>
         </div>
     </div>
+
+    <!-- Script untuk Preview Gambar (di bawah, bukan di tengah form) -->
+    <script>
+    function previewImage(input) {
+        if (input.files && input.files[0]) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = document.getElementById('previewFotoToko');
+                const placeholder = document.getElementById('placeholderFotoToko');
+                
+                img.src = e.target.result;
+                img.classList.remove('hidden');
+                if (placeholder) {
+                    placeholder.classList.add('hidden');
+                }
+            }
+            reader.readAsDataURL(input.files[0]);
+        }
+    }
+    </script>
 
 </body>
 
