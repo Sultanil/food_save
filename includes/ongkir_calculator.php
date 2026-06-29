@@ -1,176 +1,127 @@
 <?php
-// includes/ongkir_calculator.php - Logika perhitungan ongkir & voucher (PDO Version)
 
-// ==================== FUNGSI HITUNG JARAK ====================
-if (!function_exists('getJarak')) {
-    function getJarak($pdo, $pos_asal, $pos_tujuan) {
-        if ($pos_asal === 'HUB' || $pos_asal === $pos_tujuan) return 0;
-        
-        $stmt = $pdo->prepare("SELECT jarak FROM matriks_jarak WHERE pos_asal = ? AND pos_tujuan = ?");
-        $stmt->execute([$pos_asal, $pos_tujuan]);
-        $res = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        return $res ? (float)$res['jarak'] : 5;
+/**
+ * Kalkulator Checkout FoodSave
+ * Berisi logika Ongkir, Voucher, dan Total Pembayaran
+ */
+
+// ==================== KONSTANTA ====================
+define('ONGKIR_PER_KM', 750);
+define('ONGKIR_MINIMUM', 3000);
+define('BIAYA_LAYANAN_DEFAULT', 5000);
+
+// ==================== FUNGSI ONGKIR ====================
+
+/**
+ * Hitung ongkir berdasarkan kode pos pembeli
+ * Rumus: Jarak (km) × Rp 750 (Min. Rp 3.000)
+ */
+function hitungOngkir($pdo, $kode_pos_pembeli)
+{
+    if (empty($kode_pos_pembeli)) {
+        return ONGKIR_MINIMUM;
+    }
+
+    try {
+        // ✅ PERBAIKAN: Pakai tabel 'kode_pos' dan kolom 'jarak_dari_hub'
+        $stmt = $pdo->prepare("
+            SELECT jarak_dari_hub 
+            FROM kode_pos 
+            WHERE kode_pos = ?
+            LIMIT 1
+        ");
+        $stmt->execute([$kode_pos_pembeli]);
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($result && isset($result['jarak_dari_hub'])) {
+            $jarak_km = (float)$result['jarak_dari_hub'];
+            $ongkir = $jarak_km * ONGKIR_PER_KM;
+
+            // Terapkan minimum ongkir
+            return max(ONGKIR_MINIMUM, (int)$ongkir);
+        } else {
+            // Jika kode pos tidak ditemukan, gunakan default 5 km
+            return max(ONGKIR_MINIMUM, 5 * ONGKIR_PER_KM);
+        }
+    } catch (PDOException $e) {
+        error_log("Error hitung ongkir: " . $e->getMessage());
+        return ONGKIR_MINIMUM;
     }
 }
 
-// ==================== FUNGSI HITUNG ONGKIR (Single Item) ====================
-if (!function_exists('hitungOngkirKonsolidasi')) {
-    function hitungOngkirKonsolidasi($pdo, $seller_positions, $kode_pos_pembeli) {
-        if (empty($seller_positions)) return 12000;
-        
-        $placeholders = implode(',', array_fill(0, count($seller_positions), '?'));
-        
-        $stmt = $pdo->prepare("SELECT kode_pos, jarak_dari_hub FROM kode_pos WHERE kode_pos IN ($placeholders) ORDER BY jarak_dari_hub ASC");
-        $stmt->execute($seller_positions);
-        $sellers_sorted = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        if (empty($sellers_sorted)) return 12000;
-        
-        $total_jarak = 0;
-        $total_jarak += $sellers_sorted[0]['jarak_dari_hub'];
-        
-        for ($i = 0; $i < count($sellers_sorted) - 1; $i++) {
-            $jarak = getJarak($pdo, $sellers_sorted[$i]['kode_pos'], $sellers_sorted[$i+1]['kode_pos']);
-            $total_jarak += $jarak;
-        }
-        
-        $last_pos = end($sellers_sorted)['kode_pos'];
-        $jarak_final = getJarak($pdo, $last_pos, $kode_pos_pembeli);
-        $total_jarak += $jarak_final;
-        
-        return $total_jarak * 2000;
+// ==================== FUNGSI VOUCHER ====================
+
+/**
+ * Hitung diskon voucher
+ * FOODSAVE10 = 10% (Maks 10.000)
+ * FOODSAVE20 = 20% (Maks 20.000)
+ */
+function hitungDiskonVoucher($kode_voucher, $subtotal)
+{
+    $kode_voucher = strtoupper(trim($kode_voucher));
+    $result = ['valid' => false, 'diskon' => 0, 'pesan' => '', 'kode' => ''];
+
+    if (empty($kode_voucher)) {
+        return $result;
     }
+
+    // Database voucher (bisa dipindah ke tabel database nanti jika mau)
+    $vouchers = [
+        'FOODSAVE10' => ['persen' => 10, 'maks' => 10000],
+        'FOODSAVE20' => ['persen' => 20, 'maks' => 20000],
+    ];
+
+    if (isset($vouchers[$kode_voucher])) {
+        $v = $vouchers[$kode_voucher];
+        $diskon = ($subtotal * $v['persen']) / 100;
+
+        // Batasi maksimal diskon
+        if ($diskon > $v['maks']) {
+            $diskon = $v['maks'];
+        }
+
+        // Diskon tidak boleh lebih besar dari subtotal
+        if ($diskon > $subtotal) {
+            $diskon = $subtotal;
+        }
+
+        $result['valid'] = true;
+        $result['diskon'] = (int)$diskon;
+        $result['pesan'] = "🎉 Voucher {$kode_voucher} berhasil diterapkan! Hemat Rp " . number_format($diskon, 0, ',', '.');
+        $result['kode'] = $kode_voucher;
+    } else {
+        $result['pesan'] = "❌ Kode voucher tidak valid atau sudah kadaluarsa.";
+    }
+
+    return $result;
 }
 
-// ==================== FUNGSI HITUNG BIAYA KONSOLIDASI (Multi-Item) ====================
-if (!function_exists('hitungBiayaKonsolidasi')) {
-    /**
-     * Hitung ongkir + biaya layanan berdasarkan rute teroptimasi
-     * @param PDO $pdo - Koneksi database PDO
-     * @param array $seller_positions - Array kode pos penjual
-     * @param string $kode_pos_pembeli - Kode pos pembeli
-     * @return array ['ongkir' => int, 'biaya_layanan' => int, 'total_jarak' => float, 'jumlah_penjual' => int, 'detail' => string]
-     */
-    function hitungBiayaKonsolidasi($pdo, $seller_positions, $kode_pos_pembeli) {
-        if (empty($seller_positions)) {
-            return [
-                'ongkir' => 10000,
-                'biaya_layanan' => 2000,
-                'total_jarak' => 5,
-                'jumlah_penjual' => 0,
-                'detail' => 'Rute standar (fallback)'
-            ];
-        }
+// ==================== FUNGSI MASTER TOTAL (SANGAT DISARANKAN) ====================
 
-        $placeholders = implode(',', array_fill(0, count($seller_positions), '?'));
+/**
+ * Hitung semua komponen checkout dalam 1 kali panggil
+ * Mengembalikan array lengkap untuk digunakan di frontend/backend
+ */
+function hitungTotalCheckout($pdo, $subtotal, $kode_pos_pembeli, $kode_voucher = '', $biaya_layanan = BIAYA_LAYANAN_DEFAULT)
+{
+    // 1. Hitung Ongkir
+    $ongkir = hitungOngkir($pdo, $kode_pos_pembeli);
 
-        $stmt = $pdo->prepare("SELECT kode_pos, jarak_dari_hub FROM kode_pos WHERE kode_pos IN ($placeholders) ORDER BY jarak_dari_hub ASC");
-        $stmt->execute($seller_positions);
-        $sellers_sorted = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    // 2. Hitung Voucher
+    $voucher_result = hitungDiskonVoucher($kode_voucher, $subtotal);
+    $diskon = $voucher_result['diskon'];
 
-        if (empty($sellers_sorted)) {
-            return [
-                'ongkir' => 10000,
-                'biaya_layanan' => 2000,
-                'total_jarak' => 5,
-                'jumlah_penjual' => 0,
-                'detail' => 'Rute fallback'
-            ];
-        }
+    // 3. Hitung Total Akhir (Pastikan tidak minus)
+    $total_bayar = $subtotal + $biaya_layanan + $ongkir - $diskon;
+    $total_bayar = max(0, $total_bayar);
 
-        $total_jarak = 0;
-        $rute_detail = [];
-
-        // 1. Hub → Penjual Terdekat
-        $first_seller = $sellers_sorted[0]['kode_pos'];
-        $jarak_hub_first = $sellers_sorted[0]['jarak_dari_hub'];
-        $total_jarak += $jarak_hub_first;
-        $rute_detail[] = "Hub → {$first_seller} ({$jarak_hub_first} km)";
-
-        // 2. Penjual → Penjual
-        for ($i = 0; $i < count($sellers_sorted) - 1; $i++) {
-            $pos_a = $sellers_sorted[$i]['kode_pos'];
-            $pos_b = $sellers_sorted[$i + 1]['kode_pos'];
-            $jarak = getJarak($pdo, $pos_a, $pos_b);
-            $total_jarak += $jarak;
-            $rute_detail[] = "{$pos_a} → {$pos_b} ({$jarak} km)";
-        }
-
-        // 3. Penjual Terakhir → Pembeli
-        $last_pos = end($sellers_sorted)['kode_pos'];
-        $jarak_final = getJarak($pdo, $last_pos, $kode_pos_pembeli);
-        $total_jarak += $jarak_final;
-        $rute_detail[] = "{$last_pos} → {$kode_pos_pembeli} ({$jarak_final} km)";
-
-        // Perhitungan biaya
-        $tarif_per_km = 2000;
-        $ongkir = $total_jarak * $tarif_per_km;
-
-        $base_layanan = 1500;
-        $fee_per_seller = 500;
-        $fee_per_5km = 200;
-
-        $jumlah_penjual = count($sellers_sorted);
-        $biaya_layanan = $base_layanan
-            + (($jumlah_penjual - 1) * $fee_per_seller)
-            + (floor($total_jarak / 5) * $fee_per_5km);
-
-        $biaya_layanan = min($biaya_layanan, 10000);
-
-        return [
-            'ongkir' => (int)round($ongkir),
-            'biaya_layanan' => (int)round($biaya_layanan),
-            'total_jarak' => round($total_jarak, 1),
-            'jumlah_penjual' => $jumlah_penjual,
-            'detail' => implode(' → ', $rute_detail)
-        ];
-    }
+    return [
+        'ongkir' => $ongkir,
+        'biaya_layanan' => $biaya_layanan,
+        'diskon' => $diskon,
+        'total_bayar' => $total_bayar,
+        'voucher_valid' => $voucher_result['valid'],
+        'voucher_pesan' => $voucher_result['pesan'],
+        'voucher_kode' => $voucher_result['kode']
+    ];
 }
-
-// ==================== FUNGSI HITUNG DISKON VOUCHER ====================
-if (!function_exists('hitungDiskonVoucher')) {
-    function hitungDiskonVoucher($kode_voucher, $harga_produk) {
-        $kode_voucher = $kode_voucher ?? '';
-        $harga_produk = $harga_produk ?? 0;
-        
-        $kode_voucher = strtoupper(trim($kode_voucher));
-        
-        $result = [
-            'diskon' => 0,
-            'pesan' => '',
-            'valid' => false,
-            'kode' => ''
-        ];
-        
-        if (empty($kode_voucher)) {
-            return $result;
-        }
-        
-        if ($kode_voucher === 'FOODSAVE10') {
-            return [
-                'diskon' => min(10000, $harga_produk * 0.1),
-                'pesan' => '🎉 Voucher FOODSAVE10 berhasil diterapkan! Diskon 10% (Maks Rp 10.000)',
-                'valid' => true,
-                'kode' => 'FOODSAVE10'
-            ];
-        }
-        
-        if ($kode_voucher === 'FOODSAVE20') {
-            return [
-                'diskon' => min(20000, $harga_produk * 0.2),
-                'pesan' => '🎉 Voucher FOODSAVE20 berhasil diterapkan! Diskon 20% (Maks Rp 20.000)',
-                'valid' => true,
-                'kode' => 'FOODSAVE20'
-            ];
-        }
-        
-        return [
-            'diskon' => 0,
-            'pesan' => '❌ Kode voucher tidak valid!',
-            'valid' => false,
-            'kode' => ''
-        ];
-    }
-}
-?>

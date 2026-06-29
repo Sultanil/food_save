@@ -23,40 +23,90 @@ $msg_type = '';
 // 🔄 HANDLE UPDATE STATUS + RESI / ALASAN
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
     $transaksi_id = (int)$_POST['transaksi_id'];
-    $new_status   = $_POST['new_status'];
-    $valid_status = ['pending', 'dibayar', 'dikirim', 'selesai', 'dibatalkan'];
+    $new_status   = $_POST['new_status'] ?? '';
+    $new_shipping_status = $_POST['new_shipping_status'] ?? '';
+    
+    // Validasi status pembayaran
+    $valid_status = ['pending', 'dibayar', 'selesai', 'dibatalkan'];
+    // Validasi status pengiriman
+    $valid_shipping_status = ['diproses', 'dikirim', 'diterima'];
 
-    if (in_array($new_status, $valid_status)) {
-        // Cek apakah transaksi milik penjual ini
-        $check = $pdo->prepare("SELECT id FROM transaksi WHERE id = ? AND penjual_id = ?");
-        $check->execute([$transaksi_id, $penjual_id]);
-        
-        if ($check->rowCount() > 0) {
-            try {
-                if ($new_status === 'dikirim') {
-                    $no_resi = trim($_POST['no_resi'] ?? '');
-                    $upd = $pdo->prepare("UPDATE transaksi SET status = 'dikirim', no_resi = ? WHERE id = ?");
+    // Cek apakah transaksi milik penjual ini
+    $check = $pdo->prepare("SELECT id, status, shipping_status FROM transaksi WHERE id = ? AND penjual_id = ?");
+    $check->execute([$transaksi_id, $penjual_id]);
+    $current_order = $check->fetch(PDO::FETCH_ASSOC);
+    
+    if ($current_order) {
+        try {
+            // Handle konfirmasi pembayaran (pending → dibayar)
+            if ($new_status === 'dibayar' && $current_order['status'] === 'pending') {
+                $upd = $pdo->prepare("UPDATE transaksi SET status = 'dibayar', shipping_status = 'diproses' WHERE id = ?");
+                $upd->execute([$transaksi_id]);
+                $msg = 'Pembayaran berhasil dikonfirmasi!';
+                $msg_type = 'success';
+            }
+            // Handle kirim produk (dikirim dengan resi)
+            elseif ($new_shipping_status === 'dikirim' && $current_order['shipping_status'] === 'diproses') {
+                $no_resi = trim($_POST['no_resi'] ?? '');
+                if (empty($no_resi)) {
+                    $msg = 'Nomor resi wajib diisi!';
+                    $msg_type = 'error';
+                } else {
+                    $upd = $pdo->prepare("UPDATE transaksi SET shipping_status = 'dikirim', no_resi = ? WHERE id = ?");
                     $upd->execute([$no_resi, $transaksi_id]);
-                } elseif ($new_status === 'dibatalkan') {
-                    $alasan = trim($_POST['alasan_pembatalan'] ?? '');
+                    $msg = 'Produk berhasil dikirim dengan resi: ' . htmlspecialchars($no_resi);
+                    $msg_type = 'success';
+                }
+            }
+            // Handle pesanan diterima (diterima)
+            elseif ($new_shipping_status === 'diterima' && $current_order['shipping_status'] === 'dikirim') {
+                $upd = $pdo->prepare("UPDATE transaksi SET shipping_status = 'diterima', status = 'selesai' WHERE id = ?");
+                $upd->execute([$transaksi_id]);
+                $msg = 'Pesanan ditandai sebagai selesai!';
+                $msg_type = 'success';
+            }
+            // Handle pembatalan
+            elseif ($new_status === 'dibatalkan' && in_array($current_order['status'], ['pending', 'dibayar'])) {
+                $alasan = trim($_POST['alasan_pembatalan'] ?? '');
+                if (empty($alasan)) {
+                    $msg = 'Alasan pembatalan wajib diisi!';
+                    $msg_type = 'error';
+                } else {
                     $upd = $pdo->prepare("UPDATE transaksi SET status = 'dibatalkan', alasan_pembatalan = ? WHERE id = ?");
                     $upd->execute([$alasan, $transaksi_id]);
-                } else {
-                    $upd = $pdo->prepare("UPDATE transaksi SET status = ? WHERE id = ?");
-                    $upd->execute([$new_status, $transaksi_id]);
+                    $msg = 'Pesanan berhasil dibatalkan!';
+                    $msg_type = 'success';
                 }
+            }
+            // Handle manual update status (untuk fleksibilitas)
+            elseif (in_array($new_status, $valid_status) && $new_status !== $current_order['status']) {
+                $upd = $pdo->prepare("UPDATE transaksi SET status = ? WHERE id = ?");
+                $upd->execute([$new_status, $transaksi_id]);
                 $msg = 'Status pesanan berhasil diperbarui!';
                 $msg_type = 'success';
-            } catch (PDOException $e) {
-                $msg = 'Gagal memperbarui status: ' . $e->getMessage();
-                $msg_type = 'error';
             }
+            elseif (in_array($new_shipping_status, $valid_shipping_status) && $new_shipping_status !== $current_order['shipping_status']) {
+                $upd = $pdo->prepare("UPDATE transaksi SET shipping_status = ? WHERE id = ?");
+                $upd->execute([$new_shipping_status, $transaksi_id]);
+                $msg = 'Status pengiriman berhasil diperbarui!';
+                $msg_type = 'success';
+            }
+            else {
+                $msg = 'Tidak ada perubahan status.';
+                $msg_type = 'info';
+            }
+        } catch (PDOException $e) {
+            $msg = 'Gagal memperbarui status: ' . $e->getMessage();
+            $msg_type = 'error';
         }
+    } else {
+        $msg = 'Pesanan tidak ditemukan!';
+        $msg_type = 'error';
     }
 }
 
 // 📦 AMBIL DATA PESANAN
-$query = "SELECT t.id as transaksi_id, t.status, t.jumlah, t.total_harga, t.tanggal_pesanan,
+$query = "SELECT t.id as transaksi_id, t.status, t.shipping_status, t.jumlah, t.total_harga, t.tanggal_pesanan,
                  t.alamat_pengiriman, t.no_telepon, t.metode_pembayaran,
                  t.bukti_pembayaran, t.no_resi, t.alasan_pembatalan,
                  u.nama_lengkap as nama_pembeli, u.email as email_pembeli,
@@ -65,7 +115,18 @@ $query = "SELECT t.id as transaksi_id, t.status, t.jumlah, t.total_harga, t.tang
           JOIN users u ON t.user_id = u.id
           JOIN produk p ON t.produk_id = p.id
           WHERE t.penjual_id = ?
-          ORDER BY t.tanggal_pesanan DESC";
+          ORDER BY 
+            CASE 
+                WHEN t.status = 'pending' AND t.bukti_pembayaran IS NOT NULL THEN 1
+                WHEN t.status = 'pending' THEN 2
+                WHEN t.status = 'dibayar' AND t.shipping_status = 'diproses' THEN 3
+                WHEN t.shipping_status = 'dikirim' THEN 4
+                WHEN t.shipping_status = 'diterima' THEN 5
+                WHEN t.status = 'selesai' THEN 6
+                WHEN t.status = 'dibatalkan' THEN 7
+                ELSE 8
+            END,
+            t.tanggal_pesanan DESC";
 
 $stmt = $pdo->prepare($query);
 $stmt->execute([$penjual_id]);
@@ -74,16 +135,27 @@ $orders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $status_colors = [
     'pending'    => 'bg-yellow-100 text-yellow-700 border-yellow-200',
     'dibayar'    => 'bg-blue-100 text-blue-700 border-blue-200',
-    'dikirim'    => 'bg-purple-100 text-purple-700 border-purple-200',
     'selesai'    => 'bg-green-100 text-green-700 border-green-200',
     'dibatalkan' => 'bg-red-100 text-red-700 border-red-200',
 ];
+
 $status_labels = [
-    'pending'    => '⏳ Pending',
-    'dibayar'    => '💳 Dibayar',
-    'dikirim'    => '🚚 Dikirim',
+    'pending'    => '⏳ Menunggu Pembayaran',
+    'dibayar'    => '💳 Sudah Dibayar',
     'selesai'    => '✅ Selesai',
     'dibatalkan' => '❌ Dibatalkan',
+];
+
+$shipping_colors = [
+    'diproses' => 'bg-orange-100 text-orange-700 border-orange-200',
+    'dikirim'  => 'bg-purple-100 text-purple-700 border-purple-200',
+    'diterima' => 'bg-green-100 text-green-700 border-green-200',
+];
+
+$shipping_labels = [
+    'diproses' => '🔨 Sedang Diproses',
+    'dikirim'  => '🚚 Dalam Pengiriman',
+    'diterima' => '✅ Pesanan Diterima',
 ];
 ?>
 <!DOCTYPE html>
@@ -129,8 +201,8 @@ $status_labels = [
                 <p class="text-gray-500 text-sm">Kelola & perbarui status pesanan pembeli</p>
             </div>
             <?php if ($msg): ?>
-                <div class="<?= $msg_type === 'success' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200' ?> px-4 py-2 rounded-xl text-sm font-medium border">
-                    <?= $msg_type === 'success' ? '✅' : '❌' ?> <?= htmlspecialchars($msg) ?>
+                <div class="<?= $msg_type === 'success' ? 'bg-green-50 text-green-700 border-green-200' : ($msg_type === 'error' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-blue-50 text-blue-700 border-blue-200') ?> px-4 py-2 rounded-xl text-sm font-medium border">
+                    <?= $msg_type === 'success' ? '✅' : ($msg_type === 'error' ? '❌' : 'ℹ️') ?> <?= htmlspecialchars($msg) ?>
                 </div>
             <?php endif; ?>
         </div>
@@ -143,8 +215,10 @@ $status_labels = [
             </div>
         <?php else: ?>
             <div class="space-y-4">
-            <?php foreach ($orders as $o): ?>
-                <?php $color = $status_colors[$o['status']] ?? 'bg-gray-100 text-gray-700 border-gray-200'; ?>
+            <?php foreach ($orders as $o): 
+                $status_color = $status_colors[$o['status']] ?? 'bg-gray-100 text-gray-700 border-gray-200';
+                $shipping_color = $shipping_colors[$o['shipping_status']] ?? '';
+            ?>
                 <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
 
                     <!-- Order Header -->
@@ -155,9 +229,16 @@ $status_labels = [
                             </span>
                             <span class="text-xs text-gray-400"><?= date('d M Y, H:i', strtotime($o['tanggal_pesanan'])) ?></span>
                         </div>
-                        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border <?= $color ?>">
-                            <?= $status_labels[$o['status']] ?? ucfirst($o['status']) ?>
-                        </span>
+                        <div class="flex items-center gap-2">
+                            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border <?= $status_color ?>">
+                                <?= $status_labels[$o['status']] ?? ucfirst($o['status']) ?>
+                            </span>
+                            <?php if ($o['shipping_status'] && $o['status'] !== 'dibatalkan'): ?>
+                                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold border <?= $shipping_color ?>">
+                                    <?= $shipping_labels[$o['shipping_status']] ?? ucfirst($o['shipping_status']) ?>
+                                </span>
+                            <?php endif; ?>
+                        </div>
                     </div>
 
                     <div class="p-6 grid md:grid-cols-3 gap-6">
@@ -200,7 +281,7 @@ $status_labels = [
                         <div class="space-y-4">
                             <div>
                                 <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Bukti Pembayaran</p>
-                                <?php if (!empty($o['bukti_pembayaran'])): ?>
+                                <?php if (!empty($o['bukti_pembayaran']) && file_exists($o['bukti_pembayaran'])): ?>
                                     <a href="<?= htmlspecialchars($o['bukti_pembayaran']) ?>" target="_blank">
                                         <img src="<?= htmlspecialchars($o['bukti_pembayaran']) ?>" 
                                              class="w-full max-w-[180px] h-28 object-cover rounded-xl border-2 border-green-200 hover:border-green-500 transition cursor-zoom-in"
@@ -242,14 +323,14 @@ $status_labels = [
                                     <p class="text-xs text-gray-400 mt-1">Status tidak dapat diubah lagi.</p>
                                 </div>
 
-                            <?php elseif ($o['status'] === 'dikirim'): ?>
-                                <!-- Hanya bisa menyelesaikan -->
+                            <?php elseif ($o['shipping_status'] === 'dikirim'): ?>
+                                <!-- Tandai pesanan diterima -->
                                 <form method="POST">
                                     <input type="hidden" name="transaksi_id" value="<?= $o['transaksi_id'] ?>">
-                                    <input type="hidden" name="new_status" value="selesai">
+                                    <input type="hidden" name="new_shipping_status" value="diterima">
                                     <button type="submit" name="update_status"
                                             class="w-full py-2.5 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-xl transition shadow-sm text-sm cursor-pointer">
-                                        ✅ Tandai Selesai
+                                        ✅ Tandai Pesanan Diterima
                                     </button>
                                 </form>
 
@@ -267,8 +348,8 @@ $status_labels = [
                                         </form>
                                     <?php endif; ?>
 
-                                    <!-- Kirim Produk (dibayar → dikirim dengan resi) -->
-                                    <?php if ($o['status'] === 'dibayar'): ?>
+                                    <!-- Kirim Produk (diproses → dikirim dengan resi) -->
+                                    <?php if ($o['status'] === 'dibayar' && $o['shipping_status'] === 'diproses'): ?>
                                         <button type="button"
                                                 onclick="document.getElementById('modal-kirim-<?= $o['transaksi_id'] ?>').classList.remove('hidden')"
                                                 class="w-full py-2 bg-purple-500 hover:bg-purple-600 text-white font-semibold rounded-xl transition text-sm cursor-pointer">
@@ -277,11 +358,13 @@ $status_labels = [
                                     <?php endif; ?>
 
                                     <!-- Batalkan Pesanan -->
-                                    <button type="button"
-                                            onclick="document.getElementById('modal-batal-<?= $o['transaksi_id'] ?>').classList.remove('hidden')"
-                                            class="w-full py-2 bg-red-50 hover:bg-red-100 text-red-600 font-semibold rounded-xl transition text-sm border border-red-200 cursor-pointer">
-                                        ❌ Batalkan Pesanan
-                                    </button>
+                                    <?php if (in_array($o['status'], ['pending', 'dibayar'])): ?>
+                                        <button type="button"
+                                                onclick="document.getElementById('modal-batal-<?= $o['transaksi_id'] ?>').classList.remove('hidden')"
+                                                class="w-full py-2 bg-red-50 hover:bg-red-100 text-red-600 font-semibold rounded-xl transition text-sm border border-red-200 cursor-pointer">
+                                            ❌ Batalkan Pesanan
+                                        </button>
+                                    <?php endif; ?>
                                 </div>
                             <?php endif; ?>
                         </div>
@@ -295,7 +378,7 @@ $status_labels = [
                         <p class="text-sm text-gray-500 mb-4">Masukkan nomor resi pengiriman untuk pesanan <strong>#<?= str_pad($o['transaksi_id'], 4, '0', STR_PAD_LEFT) ?></strong>.</p>
                         <form method="POST">
                             <input type="hidden" name="transaksi_id" value="<?= $o['transaksi_id'] ?>">
-                            <input type="hidden" name="new_status" value="dikirim">
+                            <input type="hidden" name="new_shipping_status" value="dikirim">
                             <input type="text" name="no_resi" required placeholder="Contoh: JNE123456789ID"
                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none mb-4 text-sm font-mono">
                             <div class="flex gap-2">

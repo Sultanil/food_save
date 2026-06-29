@@ -46,9 +46,41 @@ if ($produk_id > 0 && $penjual_id > 0) {
     exit;
 }
 
+// ==================== AMBIL PAYMENT METHODS PENJUAL ====================
+$stmt_payment = $pdo->prepare("
+    SELECT * FROM seller_payment_methods 
+    WHERE penjual_id = ? AND is_active = 1 
+    ORDER BY is_default DESC, created_at ASC
+");
+$stmt_payment->execute([$penjual_id]);
+$payment_methods = $stmt_payment->fetchAll(PDO::FETCH_ASSOC);
+
+// Group by type
+$bank_accounts = array_filter($payment_methods, fn($m) => $m['payment_type'] === 'bank_transfer');
+$qris_list = array_filter($payment_methods, fn($m) => $m['payment_type'] === 'qris');
+
+// Set default payment value untuk form
+$default_payment = '';
+if (!empty($payment_methods)) {
+    foreach ($payment_methods as $pm) {
+        if ($pm['is_default']) {
+            $default_payment = $pm['payment_type'] === 'bank_transfer'
+                ? 'Transfer Bank - ' . $pm['bank_name']
+                : 'QRIS';
+            break;
+        }
+    }
+    if (empty($default_payment)) {
+        $first = reset($payment_methods);
+        $default_payment = $first['payment_type'] === 'bank_transfer'
+            ? 'Transfer Bank - ' . $first['bank_name']
+            : 'QRIS';
+    }
+}
+
 // ==================== DEFAULT VALUES ====================
 $jumlah_produk = 1;
-$biaya_layanan = 2000;
+$biaya_layanan = BIAYA_LAYANAN_DEFAULT; // Rp 5.000 dari konstanta
 $diskon = 0;
 $kode_voucher = '';
 $pesan = '';
@@ -60,14 +92,49 @@ $stmt = $pdo->prepare("SELECT nama_lengkap, email, kode_pos FROM users WHERE id 
 $stmt->execute([$user_id]);
 $user_data = $stmt->fetch(PDO::FETCH_ASSOC);
 
-$nama = $user_data['nama_lengkap'] ?? '';
-$telepon = '';
-$alamat = '';
-$pembayaran = 'Transfer Bank';
+// ==================== AMBIL DAFTAR ALAMAT TERSIMPAN ====================
+$stmt_alamat = $pdo->prepare("
+    SELECT ua.*, kp.kecamatan, kp.kelurahan 
+    FROM user_addresses ua
+    LEFT JOIN kode_pos kp ON ua.kode_pos = kp.kode_pos
+    WHERE ua.user_id = ?
+    ORDER BY ua.is_default DESC, ua.created_at DESC
+");
+$stmt_alamat->execute([$user_id]);
+$user_addresses = $stmt_alamat->fetchAll(PDO::FETCH_ASSOC);
 
-$kode_pos_pembeli = $user_data['kode_pos'] ?? $_SESSION['kode_pos'] ?? '';
-$ongkir_foodsave = hitungOngkirKonsolidasi($pdo, [$produk['penjual_kode_pos']], $kode_pos_pembeli);
+// Ambil alamat default
+$default_address = null;
+foreach ($user_addresses as $addr) {
+    if ($addr['is_default'] == 1) {
+        $default_address = $addr;
+        break;
+    }
+}
+if (!$default_address && !empty($user_addresses)) {
+    $default_address = $user_addresses[0];
+}
+
+// Pre-fill data dari alamat default atau dari user
+if ($default_address) {
+    $nama = $default_address['nama_penerima'];
+    $telepon = $default_address['telepon'];
+    $alamat = $default_address['alamat_lengkap'];
+    $kode_pos_pembeli = $default_address['kode_pos'];
+} else {
+    $nama = $user_data['nama_lengkap'] ?? '';
+    $telepon = '';
+    $alamat = '';
+    $kode_pos_pembeli = $user_data['kode_pos'] ?? $_SESSION['kode_pos'] ?? '';
+}
+
+$pembayaran = $default_payment ?: 'Transfer Bank';
+
+// ==================== HITUNG ONGKIR (LOGIKA BARU) ====================
+$ongkir_foodsave = hitungOngkir($pdo, $kode_pos_pembeli);
 $ongkir = $ongkir_foodsave;
+$is_pickup = false; // Default ke delivery
+$pengiriman = 'foodsave'; // Default ke delivery
 
 // ==================== HANDLE FORM SUBMIT ====================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -76,17 +143,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $telepon = trim($_POST['telepon'] ?? '');
     $alamat = trim($_POST['alamat'] ?? '');
     $kode_voucher = strtoupper(trim($_POST['voucher'] ?? ''));
-    $pembayaran = $_POST['pembayaran'] ?? 'Transfer Bank';
-    $ongkir = isset($_POST['pengiriman']) ? (int)$_POST['pengiriman'] : $ongkir_foodsave;
+    $pembayaran = $_POST['pembayaran'] ?? $default_payment ?: 'Transfer Bank';
 
-    // Hitung total
+    // Hitung subtotal produk
     $harga_produk = $harga_satuan * $jumlah_produk;
 
-    // Voucher logic (pakai helper function)
-    $voucher_result = hitungDiskonVoucher($kode_voucher, $harga_produk);
-    $diskon = $voucher_result['diskon'];
-    
-    $total_bayar = $harga_produk + $biaya_layanan + $ongkir - $diskon;
+    // Tentukan apakah pickup atau delivery
+    $is_pickup = isset($_POST['pengiriman']) && (int)$_POST['pengiriman'] === 0;
+    $pengiriman = $is_pickup ? 'pickup' : 'foodsave';
+
+    // Hitung semua komponen (ongkir, voucher, total)
+    $hasil_hitung = hitungTotalCheckout($pdo, $harga_produk, $kode_pos_pembeli, $kode_voucher, $biaya_layanan);
+
+    // Jika pickup, ongkir jadi 0
+    $ongkir = $is_pickup ? 0 : $hasil_hitung['ongkir'];
+    $diskon = $hasil_hitung['diskon'];
+    $voucher_result = [
+        'valid' => $hasil_hitung['voucher_valid'],
+        'pesan' => $hasil_hitung['voucher_pesan'],
+        'kode' => $hasil_hitung['voucher_kode']
+    ];
+
+    // Hitung ulang total dengan ongkir yang sesuai (pickup = 0)
+    $total_bayar = max(0, $harga_produk + $biaya_layanan + $ongkir - $diskon);
 
     if (isset($_POST['apply_voucher'])) {
         if ($voucher_result['valid']) {
@@ -108,11 +187,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // ✅ INSERT KE DATABASE
             try {
                 $batch_id = generateBatchId($user_id);
-                
+
                 $stmt = $pdo->prepare("
                     INSERT INTO transaksi 
-                    (user_id, penjual_id, produk_id, jumlah, total_harga, status, alamat_pengiriman, no_telepon, metode_pembayaran, ongkir, diskon, kode_voucher, checkout_batch_id, shipping_status) 
-                    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, 'diproses')
+                    (user_id, penjual_id, produk_id, jumlah, total_harga, status, alamat_pengiriman, no_telepon, metode_pembayaran, ongkir, diskon, kode_voucher, checkout_batch_id, shipping_status, shipping_method) 
+                    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, 'diproses', ?)
                 ");
 
                 $stmt->execute([
@@ -127,16 +206,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $ongkir,
                     $diskon,
                     $kode_voucher,
-                    $batch_id
+                    $batch_id,
+                    $pengiriman
                 ]);
 
                 // Kurangi stok produk
                 $stmt_update = $pdo->prepare("UPDATE produk SET stok = stok - ? WHERE id = ?");
                 $stmt_update->execute([$jumlah_produk, $produk_id]);
 
-                header("Location: payment_upload.php?batch_id=$batch_id&total=$total_bayar&pembayaran=" . urlencode($pembayaran));
+                // Redirect ke payment_summary.php (halaman upload bukti)
+                header("Location: payment_summary.php?batch_id=$batch_id&total=$total_bayar&pembayaran=" . urlencode($pembayaran));
                 exit;
-                
             } catch (PDOException $e) {
                 $pesan = '❌ Gagal memproses pesanan: ' . $e->getMessage();
                 $pesan_class = 'error';
@@ -148,6 +228,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $harga_produk = $harga_satuan * $jumlah_produk;
     $total_bayar = $harga_produk + $biaya_layanan + $ongkir - $diskon;
 }
+$is_pickup = ($pengiriman === 'pickup');
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -261,26 +342,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             Data Pembeli
                         </h2>
 
+                        <!-- Pilih Alamat Tersimpan -->
+                        <?php if (!empty($user_addresses)): ?>
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">📍 Pilih Alamat Pengiriman</label>
+                                <select id="selectAlamat" onchange="pilihAlamat(this.value)"
+                                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand outline-none bg-white">
+                                    <option value="">-- Pilih Alamat --</option>
+                                    <?php foreach ($user_addresses as $addr): ?>
+                                        <option value="<?= htmlspecialchars(json_encode($addr)) ?>"
+                                            <?= ($default_address && $addr['id'] === $default_address['id']) ? 'selected' : '' ?>>
+                                            <?= htmlspecialchars($addr['nama_penerima']) ?> -
+                                            <?= htmlspecialchars($addr['kelurahan'] ?? '') ?>, <?= htmlspecialchars($addr['kecamatan'] ?? '') ?>
+                                            <?= $addr['is_default'] ? ' ⭐' : '' ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                    <option value="new">+ Tambah Alamat Baru</option>
+                                </select>
+                                <a href="alamat_saya.php" class="text-sm text-brand hover:underline mt-2 inline-block">
+                                    🔧 Kelola Alamat
+                                </a>
+                            </div>
+                        <?php else: ?>
+                            <div class="mb-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                                <p class="text-sm text-amber-800 mb-2">⚠️ Anda belum memiliki alamat tersimpan.</p>
+                                <a href="alamat_saya.php" class="text-sm text-brand hover:underline font-medium">
+                                    + Tambah Alamat Sekarang
+                                </a>
+                            </div>
+                        <?php endif; ?>
+
                         <div class="space-y-4">
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Nama Lengkap *</label>
-                                <input type="text" name="nama" value="<?= htmlspecialchars($nama) ?>"
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Nama Penerima *</label>
+                                <input type="text" name="nama" id="inputNama" value="<?= htmlspecialchars($nama) ?>"
                                     class="w-full px-4 py-3 border border-gray-300 rounded-lg input-focus"
-                                    placeholder="Nama sesuai KTP">
+                                    placeholder="Nama Penerima">
                             </div>
 
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Nomor WhatsApp *</label>
-                                <input type="tel" name="telepon" value="<?= htmlspecialchars($telepon) ?>"
+                                <input type="tel" name="telepon" id="inputTelepon" value="<?= htmlspecialchars($telepon) ?>"
                                     class="w-full px-4 py-3 border border-gray-300 rounded-lg input-focus"
                                     placeholder="08xxxxxxxxxx">
                             </div>
 
                             <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Alamat Pengiriman *</label>
-                                <textarea name="alamat" rows="3"
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Alamat Pengiriman Lengkap *</label>
+                                <textarea name="alamat" id="inputAlamat" rows="3"
                                     class="w-full px-4 py-3 border border-gray-300 rounded-lg input-focus resize-none"
                                     placeholder="Jl. Contoh No. 123, RT/RW, Kelurahan, Kecamatan, Kota"><?= htmlspecialchars($alamat) ?></textarea>
+                                <?php if (!empty($kode_pos_pembeli)): ?>
+                                    <p class="text-xs text-gray-400 mt-1" id="kodePosDisplay">
+                                        📮 Kode Pos: <strong><?= htmlspecialchars($kode_pos_pembeli) ?></strong>
+                                    </p>
+                                <?php endif; ?>
                             </div>
                         </div>
                     </div>
@@ -293,17 +409,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         </h2>
 
                         <div class="space-y-3">
-                            <label class="flex items-center gap-3 p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand transition <?= $ongkir === $ongkir_foodsave ? 'border-brand bg-brand/5' : '' ?>">
-                                <input type="radio" name="pengiriman" value="<?= $ongkir_foodsave ?>" class="w-4 h-4 text-brand" <?= $ongkir === $ongkir_foodsave ? 'checked' : '' ?> onchange="hitungTotal()">
+                            <label class="flex items-center gap-3 p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand transition <?= !$is_pickup ? 'border-brand bg-brand/5' : '' ?>">
+                                <input type="radio" name="pengiriman" value="<?= $ongkir_foodsave ?>" class="w-4 h-4 text-brand" <?= !$is_pickup ? 'checked' : '' ?> onchange="hitungTotal()">
                                 <div class="flex-1">
                                     <span class="font-medium text-gray-900">🌿 FoodSave Delivery</span>
-                                    <p class="text-sm text-gray-500">Estimasi 1-3 jam • Rute teroptimasi & ramah lingkungan</p>
+                                    <p class="text-sm text-gray-500">Estimasi 1-3 jam • Ongkir dari Hub: Rp 750/km</p>
                                 </div>
                                 <span class="font-semibold text-brand"><?= formatRupiah($ongkir_foodsave) ?></span>
                             </label>
 
-                            <label class="flex items-center gap-3 p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand transition <?= $ongkir === 0 ? 'border-brand bg-brand/5' : '' ?>">
-                                <input type="radio" name="pengiriman" value="0" class="w-4 h-4 text-brand" <?= $ongkir === 0 ? 'checked' : '' ?> onchange="hitungTotal()">
+                            <label class="flex items-center gap-3 p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand transition <?= $is_pickup ? 'border-brand bg-brand/5' : '' ?>">
+                                <input type="radio" name="pengiriman" value="0" class="w-4 h-4 text-brand" <?= $is_pickup ? 'checked' : '' ?> onchange="hitungTotal()">
                                 <div class="flex-1">
                                     <span class="font-medium text-gray-900">🏪 Ambil Sendiri di Toko</span>
                                     <p class="text-sm text-gray-500">Gratis • <?= htmlspecialchars($produk['nama_toko']) ?></p>
@@ -320,21 +436,103 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             Metode Pembayaran
                         </h2>
 
-                        <div class="grid grid-cols-2 gap-3">
-                            <label class="p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand transition text-center <?= $pembayaran === 'Transfer Bank' ? 'border-brand bg-brand/5' : '' ?>">
-                                <input type="radio" name="pembayaran" value="Transfer Bank" class="sr-only" <?= $pembayaran === 'Transfer Bank' ? 'checked' : '' ?>>
-                                <div class="text-2xl mb-1">🏦</div>
-                                <div class="text-sm font-medium text-gray-900">Transfer Bank</div>
-                                <div class="text-xs text-gray-500">BCA / Mandiri / BRI</div>
-                            </label>
+                        <?php if (empty($payment_methods)): ?>
+                            <div class="p-4 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-sm">
+                                ⚠️ Penjual belum menambahkan metode pembayaran. Silakan hubungi penjual untuk konfirmasi.
+                            </div>
+                            <input type="hidden" name="pembayaran" value="Transfer Manual">
+                        <?php else: ?>
 
-                            <label class="p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand transition text-center <?= $pembayaran === 'QRIS' ? 'border-brand bg-brand/5' : '' ?>">
-                                <input type="radio" name="pembayaran" value="QRIS" class="sr-only" <?= $pembayaran === 'QRIS' ? 'checked' : '' ?>>
-                                <div class="text-2xl mb-1">📱</div>
-                                <div class="text-sm font-medium text-gray-900">QRIS</div>
-                                <div class="text-xs text-gray-500">Scan & Bayar Instan</div>
-                            </label>
-                        </div>
+                            <!-- BANK TRANSFER OPTIONS -->
+                            <?php if (!empty($bank_accounts)): ?>
+                                <div class="mb-4">
+                                    <h3 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                                        🏦 Transfer Bank
+                                    </h3>
+                                    <div class="space-y-3">
+                                        <?php foreach ($bank_accounts as $bank):
+                                            $value = 'Transfer Bank - ' . $bank['bank_name'];
+                                            $is_selected = ($pembayaran === $value);
+                                        ?>
+                                            <label class="flex items-start gap-3 p-4 border-2 <?= $is_selected ? 'border-brand bg-brand/5' : 'border-gray-200' ?> rounded-xl cursor-pointer hover:border-brand transition">
+                                                <input type="radio"
+                                                    name="pembayaran"
+                                                    value="<?= htmlspecialchars($value) ?>"
+                                                    class="mt-1 w-4 h-4 text-brand"
+                                                    <?= $is_selected ? 'checked' : '' ?>>
+                                                <div class="flex-1">
+                                                    <div class="flex items-center gap-2 mb-1">
+                                                        <span class="text-xl">🏦</span>
+                                                        <span class="font-semibold text-gray-900"><?= htmlspecialchars($bank['bank_name']) ?></span>
+                                                        <?php if ($bank['is_default']): ?>
+                                                            <span class="px-2 py-0.5 bg-brand/10 text-brand text-xs font-bold rounded-full">⭐ Default</span>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                    <div class="ml-8 space-y-1 text-sm">
+                                                        <p class="text-gray-700">
+                                                            <span class="text-gray-500">No. Rek:</span>
+                                                            <strong class="font-mono text-base"><?= htmlspecialchars($bank['account_number']) ?></strong>
+                                                        </p>
+                                                        <p class="text-gray-700">
+                                                            <span class="text-gray-500">A/N:</span>
+                                                            <?= htmlspecialchars($bank['account_holder']) ?>
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </label>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </div>
+                            <?php endif; ?>
+
+                            <!-- QRIS OPTIONS -->
+                            <?php if (!empty($qris_list)): ?>
+                                <div class="mb-4">
+                                    <h3 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                                        📱 QRIS
+                                    </h3>
+                                    <div class="space-y-3">
+                                        <?php foreach ($qris_list as $qris):
+                                            $value = 'QRIS';
+                                            $is_selected = ($pembayaran === $value);
+                                        ?>
+                                            <label class="flex items-start gap-3 p-4 border-2 <?= $is_selected ? 'border-brand bg-brand/5' : 'border-gray-200' ?> rounded-xl cursor-pointer hover:border-brand transition">
+                                                <input type="radio"
+                                                    name="pembayaran"
+                                                    value="<?= htmlspecialchars($value) ?>"
+                                                    class="mt-1 w-4 h-4 text-brand"
+                                                    <?= $is_selected ? 'checked' : '' ?>>
+                                                <div class="flex-1">
+                                                    <div class="flex items-center gap-2 mb-1">
+                                                        <span class="text-xl">📱</span>
+                                                        <span class="font-semibold text-gray-900">QRIS Code</span>
+                                                        <?php if ($qris['is_default']): ?>
+                                                            <span class="px-2 py-0.5 bg-brand/10 text-brand text-xs font-bold rounded-full">⭐ Default</span>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                    <p class="text-sm text-gray-600 ml-8">Scan kode QR untuk pembayaran instan</p>
+
+                                                    <?php if (!empty($qris['qris_image']) && $is_selected): ?>
+                                                        <div class="mt-3 ml-8">
+                                                            <img src="<?= htmlspecialchars($qris['qris_image']) ?>"
+                                                                alt="QRIS"
+                                                                class="w-40 h-40 object-cover rounded-lg border border-gray-200 shadow-sm">
+                                                        </div>
+                                                    <?php endif; ?>
+                                                </div>
+                                            </label>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </div>
+                            <?php endif; ?>
+
+                            <div class="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                <p class="text-xs text-blue-800">
+                                    ℹ️ <strong>Cara Bayar:</strong> Pilih metode di atas, lalu klik "Bayar Sekarang". Anda akan diarahkan ke halaman upload bukti pembayaran.
+                                </p>
+                            </div>
+
+                        <?php endif; ?>
                     </div>
 
                     <!-- Voucher -->
@@ -347,8 +545,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
                             <p class="text-sm text-yellow-800">
                                 <strong>Voucher tersedia:</strong><br>
-                                <code class="bg-white px-2 py-0.5 rounded">FOODSAVE10</code> = Diskon <?= formatRupiah(10000) ?><br>
-                                <code class="bg-white px-2 py-0.5 rounded">FOODSAVE20</code> = Diskon <?= formatRupiah(20000) ?>
+                                <code class="bg-white px-2 py-0.5 rounded">FOODSAVE10</code> = Diskon 10% (Maks <?= formatRupiah(10000) ?>)<br>
+                                <code class="bg-white px-2 py-0.5 rounded">FOODSAVE20</code> = Diskon 20% (Maks <?= formatRupiah(20000) ?>)
                             </p>
                         </div>
 
@@ -443,10 +641,272 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         const biayaLayanan = <?= $biaya_layanan ?>;
         let diskon = <?= $diskon ?>;
         const stokMaks = <?= $produk['stok'] ?>;
+        const ongkirFoodsave = <?= $ongkir_foodsave ?>;
+
+        // Fungsi hitung total
+        function hitungTotal() {
+            console.log('💰 [HITUNG TOTAL] Mulai...');
+
+            // 1. Ambil jumlah produk
+            const jumlahInput = document.querySelector('input[name="jumlah_produk"]');
+            const jumlah = parseInt(jumlahInput?.value) || 1;
+            console.log('   - Jumlah:', jumlah);
+
+            // 2. Ambil pengiriman yang dipilih
+            const pengirimanRadio = document.querySelector('input[name="pengiriman"]:checked');
+            const pengirimanValue = pengirimanRadio ? parseInt(pengirimanRadio.value) : 0;
+            console.log('   - Pengiriman value:', pengirimanValue);
+
+            // 3. Tentukan ongkir
+            let ongkir = 0;
+            if (pengirimanValue === 0) {
+                ongkir = 0; // Pickup
+                console.log('   - Pickup dipilih, ongkir = 0');
+            } else {
+                // Delivery - pakai dari window atau fallback
+                ongkir = window.ongkirFoodsave || <?= $ongkir_foodsave ?>;
+                console.log('   - Delivery dipilih, ongkir =', ongkir);
+            }
+
+            // 4. Hitung subtotal
+            const subtotal = hargaSatuan * jumlah;
+            console.log('   - Subtotal:', formatRupiah(subtotal));
+
+            // 5. Hitung total
+            const total = Math.max(0, subtotal + biayaLayanan + ongkir - diskon);
+            console.log('   - Total:', formatRupiah(total));
+            console.log('     (Subtotal:', formatRupiah(subtotal),
+                '+ Layanan:', formatRupiah(biayaLayanan),
+                '+ Ongkir:', formatRupiah(ongkir),
+                '- Diskon:', formatRupiah(diskon) + ')');
+
+            // 6. Update semua elemen yang menampilkan total
+            const elementsToUpdate = [{
+                    id: 'subtotalDisplay',
+                    value: formatRupiah(subtotal)
+                },
+                {
+                    id: 'ongkirDisplay',
+                    value: ongkir === 0 ? 'Gratis' : formatRupiah(ongkir)
+                },
+                {
+                    id: 'diskonDisplay',
+                    value: '- ' + formatRupiah(diskon)
+                },
+                {
+                    id: 'totalDisplay',
+                    value: formatRupiah(total)
+                },
+                {
+                    id: 'btnTotal',
+                    value: formatRupiah(total)
+                }
+            ];
+
+            elementsToUpdate.forEach(item => {
+                const el = document.getElementById(item.id);
+                if (el) {
+                    el.textContent = item.value;
+                    console.log(`   - Updated #${item.id}:`, item.value);
+                } else {
+                    console.error(`   - Element #${item.id} TIDAK ditemukan!`);
+                }
+            });
+
+            // 7. Update hidden input
+            const hiddenInput = document.getElementById('hidden_jumlah_produk');
+            if (hiddenInput) {
+                hiddenInput.value = jumlah;
+            }
+
+            console.log('💰 [HITUNG TOTAL] SELESAI!');
+        }
+
+        function formatRupiah(angka) {
+            return 'Rp ' + angka.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+        }
+
+        function updateQty(change) {
+            const input = document.querySelector('input[name="jumlah_produk"]');
+            let currentQty = parseInt(input.value) || 1;
+            let newQty = currentQty + change;
+
+            if (newQty < 1) newQty = 1;
+            if (newQty > stokMaks) newQty = stokMaks;
+
+            input.value = newQty;
+
+            const buttons = document.querySelectorAll('button[onclick^="updateQty"]');
+            buttons[0].disabled = (newQty <= 1);
+            buttons[1].disabled = (newQty >= stokMaks);
+
+            hitungTotal();
+        }
+
+        // Fungsi pilih alamat dari dropdown
+        async function pilihAlamat(jsonData) {
+            console.log('🎯 pilihAlamat called!');
+            console.log('   Data:', jsonData);
+
+            if (jsonData === 'new') {
+                window.location.href = 'alamat_saya.php';
+                return;
+            }
+
+            if (!jsonData) {
+                console.log('   ⚠️ jsonData kosong!');
+                return;
+            }
+
+            try {
+                const alamat = JSON.parse(jsonData);
+                console.log('   ✅ Parsed alamat:', alamat);
+
+                // Fill form
+                document.getElementById('inputNama').value = alamat.nama_penerima || '';
+                document.getElementById('inputTelepon').value = alamat.telepon || '';
+                document.getElementById('inputAlamat').value = alamat.alamat_lengkap || '';
+
+                const kodePosElement = document.getElementById('kodePosDisplay');
+                if (kodePosElement && alamat.kode_pos) {
+                    kodePosElement.innerHTML = `📮 Kode Pos: <strong>${alamat.kode_pos}</strong>`;
+                    console.log('   📮 Kode pos:', alamat.kode_pos);
+
+                    await updateOngkir(alamat.kode_pos);
+                } else {
+                    console.log('   ⚠️ kodePosElement atau alamat.kode_pos tidak ada');
+                }
+            } catch (e) {
+                console.error('   ❌ Error parsing alamat:', e);
+            }
+        }
+
+        // Fungsi update ongkir via AJAX
+        async function updateOngkir(kodePos) {
+            console.log('🔄 [UPDATE ONGKIR] Mulai untuk kode pos:', kodePos);
+
+            try {
+                const response = await fetch(`assets/api/get_ongkir.php?kode_pos=${kodePos}`);
+                const data = await response.json();
+
+                console.log('📡 [UPDATE ONGKIR] Response:', data);
+
+                if (data.success) {
+                    console.log('✅ [UPDATE ONGKIR] API berhasil!');
+                    console.log('   - Jarak:', data.jarak_km, 'km');
+                    console.log('   - Ongkir baru:', data.formatted_ongkir);
+
+                    // 1. Update variabel global
+                    window.ongkirFoodsave = data.ongkir;
+                    console.log('   - window.ongkirFoodsave =', window.ongkirFoodsave);
+
+                    // 2. Update radio button delivery (yang bukan pickup)
+                    const allRadios = document.querySelectorAll('input[name="pengiriman"]');
+                    console.log('📻 [UPDATE ONGKIR] Total radio buttons:', allRadios.length);
+
+                    allRadios.forEach((radio, index) => {
+                        console.log(`   Radio ${index}: value="${radio.value}", checked=${radio.checked}`);
+                    });
+
+                    // Cari radio delivery (value bukan "0")
+                    const radioDelivery = document.querySelector('input[name="pengiriman"]:not([value="0"])');
+
+                    if (radioDelivery) {
+                        console.log('✅ [UPDATE ONGKIR] Radio delivery ditemukan!');
+
+                        // Update VALUE radio button
+                        radioDelivery.value = data.ongkir;
+                        console.log('   - Updated value to:', radioDelivery.value);
+
+                        // Cari dan update label
+                        const label = radioDelivery.closest('label');
+                        if (label) {
+                            console.log('   - Label ditemukan');
+
+                            // Update semua elemen yang mungkin menampilkan harga
+                            const priceElements = label.querySelectorAll('.font-bold, [class*="font-bold"]');
+                            console.log('   - Jumlah elemen harga ditemukan:', priceElements.length);
+
+                            priceElements.forEach(el => {
+                                el.textContent = data.formatted_ongkir;
+                                console.log('   - Updated element:', el.textContent);
+                            });
+
+                            // Fallback: cari elemen dengan class text-brand atau text-green-600
+                            const priceByColor = label.querySelector('.text-brand, .text-green-600');
+                            if (priceByColor) {
+                                priceByColor.textContent = data.formatted_ongkir;
+                                console.log('   - Updated by color class:', priceByColor.textContent);
+                            }
+                        } else {
+                            console.error('   ❌ Label tidak ditemukan!');
+                        }
+                    } else {
+                        console.error('   ❌ Radio delivery TIDAK ditemukan!');
+                        console.error('   Mungkin semua radio memiliki value="0"?');
+                    }
+
+                    // 3. Update summary di kanan (element #ongkirDisplay)
+                    const ongkirDisplay = document.getElementById('ongkirDisplay');
+                    if (ongkirDisplay) {
+                        console.log('✅ [UPDATE ONGKIR] Element #ongkirDisplay ditemukan');
+
+                        // Cek apakah pickup yang dipilih
+                        const checkedRadio = document.querySelector('input[name="pengiriman"]:checked');
+                        const isCheckedPickup = checkedRadio && checkedRadio.value === '0';
+
+                        if (isCheckedPickup) {
+                            ongkirDisplay.innerHTML = 'Gratis (Pick Up) <span class="text-xs text-gray-400 block">(Ambil Sendiri)</span>';
+                            console.log('   - Pickup dipilih, ongkir = Gratis');
+                        } else {
+                            ongkirDisplay.innerHTML = `${data.formatted_ongkir} <span class="text-xs text-gray-400 block">(FoodSave Delivery)</span>`;
+                            console.log('   - Delivery dipilih, ongkir =', data.formatted_ongkir);
+                        }
+                    } else {
+                        console.error('   ❌ Element #ongkirDisplay TIDAK ditemukan!');
+                    }
+
+                    // 4. Update total bayar
+                    console.log('🧮 [UPDATE ONGKIR] Memanggil hitungTotal()...');
+                    hitungTotal();
+
+                    console.log('✅ [UPDATE ONGKIR] SELESAI!');
+
+                    // 5. Force re-render dengan toggle class
+                    const deliveryLabel = document.querySelector('input[name="pengiriman"]:not([value="0"])')?.closest('label');
+                    if (deliveryLabel) {
+                        // Toggle class untuk trigger re-render
+                        deliveryLabel.classList.remove('border-green-500');
+                        setTimeout(() => {
+                            deliveryLabel.classList.add('border-green-500');
+                        }, 10);
+
+                        console.log('🎨 [UPDATE ONGKIR] Force re-render label');
+                    }
+
+                    // 6. Scroll sedikit ke bawah dan atas untuk trigger repaint
+                    window.scrollTo(0, window.scrollY + 1);
+                    setTimeout(() => {
+                        window.scrollTo(0, window.scrollY - 1);
+                    }, 50);
+
+                    console.log('✅ [UPDATE ONGKIR] SELESAI TOTAL!');
+
+                    // 7. Alert untuk konfirmasi visual (bisa dihapus nanti)
+                    // alert(`✅ Ongkir berhasil diupdate!\n\nTotal Bayar: ${formatRupiah(total)}`);
+
+                } else {
+                    console.error('❌ [UPDATE ONGKIR] API return error:', data.message);
+                }
+            } catch (error) {
+                console.error('❌ [UPDATE ONGKIR] Exception:', error);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            hitungTotal();
+        });
     </script>
-    
-    <!-- Load JavaScript dari file terpisah -->
-    <script src="assets/js/checkout.js"></script>
 
 </body>
 

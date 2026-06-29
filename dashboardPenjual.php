@@ -31,9 +31,86 @@ $penjual_id = $penjual['id'];
 $status_verifikasi = $penjual['status_verifikasi'] ?? 'pending';
 $alasan_penolakan = $penjual['alasan_penolakan'] ?? '';
 
+// ==================== HANDLE UPDATE STATUS PESANAN ====================
+$pesan_update = '';
+$pesan_update_class = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
+    $transaksi_id = (int)$_POST['transaksi_id'];
+    $new_shipping_status = $_POST['shipping_status'] ?? '';
+    $new_status = $_POST['status'] ?? '';
+    
+    // Validasi sesuai ENUM di database
+    $allowed_shipping_status = ['diproses', 'dikirim', 'diterima'];
+    $allowed_status = ['pending', 'dibayar', 'selesai', 'dibatalkan'];
+    
+    if (!in_array($new_shipping_status, $allowed_shipping_status)) {
+        $pesan_update = "❌ Status pengiriman tidak valid!";
+        $pesan_update_class = 'error';
+    } elseif (!in_array($new_status, $allowed_status)) {
+        $pesan_update = "❌ Status transaksi tidak valid!";
+        $pesan_update_class = 'error';
+    } else {
+        try {
+            $stmt_update = $pdo->prepare("
+                UPDATE transaksi 
+                SET shipping_status = ?, status = ?
+                WHERE id = ? AND penjual_id = ?
+            ");
+            $stmt_update->execute([$new_shipping_status, $new_status, $transaksi_id, $penjual_id]);
+            
+            $pesan_update = "✅ Status pesanan berhasil diupdate!";
+            $pesan_update_class = 'success';
+            
+            // Refresh halaman
+            header("Location: dashboardPenjual.php?msg=status_updated");
+            exit;
+        } catch (PDOException $e) {
+            $pesan_update = "❌ Gagal update status: " . $e->getMessage();
+            $pesan_update_class = 'error';
+        }
+    }
+}
+
+// ==================== AMBIL PESANAN MASUK DENGAN BUKTI PEMBAYARAN ====================
+$stmt_pesanan = $pdo->prepare("
+    SELECT 
+        t.*,
+        p.nama_produk,
+        p.harga_asli,
+        p.harga_diskon,
+        p.satuan,
+        u.nama_lengkap as nama_pembeli,
+        u.email as email_pembeli
+    FROM transaksi t
+    JOIN produk p ON t.produk_id = p.id
+    JOIN users u ON t.user_id = u.id
+    WHERE t.penjual_id = ?
+    ORDER BY 
+        CASE 
+            WHEN t.status = 'pending' AND t.bukti_pembayaran IS NOT NULL THEN 1
+            WHEN t.status = 'pending' THEN 2
+            WHEN t.status = 'dibayar' THEN 3
+            WHEN t.shipping_status = 'diproses' THEN 4
+            WHEN t.shipping_status = 'dikirim' THEN 5
+            WHEN t.shipping_status = 'diterima' THEN 6
+            ELSE 7
+        END,
+        t.tanggal_pesanan DESC
+");
+$stmt_pesanan->execute([$penjual_id]);
+$pesanan_list = $stmt_pesanan->fetchAll(PDO::FETCH_ASSOC);
+
+// Group by status
+$pesanan_perlu_verifikasi = array_filter($pesanan_list, fn($p) => $p['status'] === 'pending' && !empty($p['bukti_pembayaran']));
+$pesanan_dibayar = array_filter($pesanan_list, fn($p) => $p['status'] === 'dibayar');
+$pesanan_diproses = array_filter($pesanan_list, fn($p) => $p['shipping_status'] === 'diproses');
+$pesanan_dikirim = array_filter($pesanan_list, fn($p) => $p['shipping_status'] === 'dikirim');
+$pesanan_selesai = array_filter($pesanan_list, fn($p) => $p['shipping_status'] === 'diterima');
+
 // ==================== AMBIL PRODUK PENJUAL ====================
 try {
-    $stmt = $pdo->prepare("SELECT id, nama_produk, harga_asli, harga_diskon, stok, satuan, gambar_url, status FROM produk WHERE penjual_id = ? ORDER BY created_at DESC");
+    $stmt = $pdo->prepare("SELECT id, nama_produk, harga_asli, harga_diskon, stok, satuan, gambar_url, status FROM produk WHERE penjual_id = ? ORDER BY id DESC");
     $stmt->execute([$penjual_id]);
     $produk_list = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
@@ -80,6 +157,8 @@ if (isset($_GET['msg'])) {
         $success_msg = "✅ Produk berhasil dinonaktifkan!";
     } elseif ($_GET['msg'] === 'deleted') {
         $success_msg = "✅ Metode pembayaran berhasil dihapus!";
+    } elseif ($_GET['msg'] === 'status_updated') {
+        $success_msg = "✅ Status pesanan berhasil diperbarui!";
     }
 }
 ?>
@@ -230,6 +309,184 @@ if (isset($_GET['msg'])) {
                         </a>
                     </div>
                 </div>
+            <?php endif; ?>
+
+            <!-- ==================== SECTION VERIFIKASI PEMBAYARAN ==================== -->
+            <?php if ($status_verifikasi === 'disetujui' && count($pesanan_perlu_verifikasi) > 0): ?>
+            <div class="bg-white rounded-xl shadow-sm border-2 border-yellow-200 overflow-hidden mb-8">
+                <div class="p-6 border-b border-yellow-100 bg-yellow-50 flex items-center justify-between">
+                    <h3 class="font-semibold text-lg text-gray-900 flex items-center gap-2">
+                        <span class="text-2xl">💳</span>
+                        Verifikasi Pembayaran
+                        <span class="px-3 py-1 bg-red-500 text-white text-xs font-bold rounded-full animate-pulse">
+                            <?= count($pesanan_perlu_verifikasi) ?>
+                        </span>
+                    </h3>
+                    <a href="pesanan.php" class="text-sm text-yellow-700 hover:text-yellow-900 font-medium">
+                        Lihat Semua →
+                    </a>
+                </div>
+
+                <div class="p-6 space-y-6">
+                    <?php foreach (array_slice($pesanan_perlu_verifikasi, 0, 3) as $pesanan): ?>
+                        <div class="border-2 border-gray-200 rounded-xl p-5 hover:border-yellow-300 transition">
+                            <!-- Header -->
+                            <div class="flex items-start justify-between mb-4 pb-3 border-b border-gray-100">
+                                <div>
+                                    <h4 class="font-bold text-gray-900">
+                                        Pesanan #<?= substr($pesanan['checkout_batch_id'], -6) ?>
+                                    </h4>
+                                    <p class="text-xs text-gray-500 mt-1">
+                                        <?= date('d M Y, H:i', strtotime($pesanan['tanggal_pesanan'])) ?>
+                                    </p>
+                                </div>
+                                <span class="px-3 py-1 bg-yellow-100 text-yellow-700 text-xs font-bold rounded-full">
+                                    Menunggu Konfirmasi
+                                </span>
+                            </div>
+
+                            <div class="grid md:grid-cols-2 gap-5">
+                                <!-- Info Pembeli & Produk -->
+                                <div class="space-y-3">
+                                    <!-- Data Pembeli -->
+                                    <div class="bg-gray-50 rounded-lg p-3">
+                                        <p class="text-xs font-semibold text-gray-500 mb-2">👤 PEMBELI</p>
+                                        <p class="text-sm font-medium text-gray-900"><?= htmlspecialchars($pesanan['nama_pembeli']) ?></p>
+                                        <p class="text-xs text-gray-600">📞 <?= htmlspecialchars($pesanan['no_telepon']) ?></p>
+                                        <p class="text-xs text-gray-600 mt-1">📍 <?= htmlspecialchars(substr($pesanan['alamat_pengiriman'], 0, 50)) ?>...</p>
+                                    </div>
+
+                                    <!-- Produk -->
+                                    <div class="bg-gray-50 rounded-lg p-3">
+                                        <p class="text-xs font-semibold text-gray-500 mb-2">📦 PRODUK</p>
+                                        <p class="text-sm font-medium text-gray-900"><?= htmlspecialchars($pesanan['nama_produk']) ?></p>
+                                        <p class="text-xs text-gray-600">Qty: <?= $pesanan['jumlah'] ?> <?= htmlspecialchars($pesanan['satuan'] ?? '') ?></p>
+                                        <p class="text-sm font-bold text-green-600 mt-1">Rp <?= number_format($pesanan['total_harga'], 0, ',', '.') ?></p>
+                                    </div>
+
+                                    <!-- Metode Pembayaran -->
+                                    <div class="bg-blue-50 rounded-lg p-3">
+                                        <p class="text-xs font-semibold text-blue-700 mb-1">💳 METODE PEMBAYARAN</p>
+                                        <p class="text-sm font-medium text-gray-900"><?= htmlspecialchars($pesanan['metode_pembayaran']) ?></p>
+                                    </div>
+                                </div>
+
+                                <!-- Bukti Pembayaran -->
+                                <div>
+                                    <p class="text-xs font-semibold text-gray-500 mb-2">📸 BUKTI PEMBAYARAN</p>
+                                    <?php if (!empty($pesanan['bukti_pembayaran']) && file_exists($pesanan['bukti_pembayaran'])): ?>
+                                        <a href="<?= htmlspecialchars($pesanan['bukti_pembayaran']) ?>" target="_blank" class="block mb-3">
+                                            <img src="<?= htmlspecialchars($pesanan['bukti_pembayaran']) ?>" 
+                                                 alt="Bukti Pembayaran" 
+                                                 class="w-full h-48 object-cover rounded-lg border-2 border-gray-200 hover:border-yellow-400 transition cursor-pointer shadow-sm">
+                                            <p class="text-xs text-center text-blue-600 mt-2 hover:underline">
+                                                🔍 Klik untuk memperbesar
+                                            </p>
+                                        </a>
+                                    <?php else: ?>
+                                        <div class="bg-gray-100 rounded-lg p-6 text-center text-gray-400 mb-3">
+                                            <div class="text-3xl mb-2">📷</div>
+                                            <p class="text-xs">Belum ada bukti</p>
+                                        </div>
+                                    <?php endif; ?>
+
+                                    <!-- Form Update Status -->
+                                    <form method="POST" class="space-y-2">
+                                        <input type="hidden" name="transaksi_id" value="<?= $pesanan['id'] ?>">
+                                        <input type="hidden" name="status" value="dibayar">
+                                        
+                                        <select name="shipping_status" 
+                                            class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 outline-none">
+                                            <option value="diproses">🔨 Sedang Diproses</option>
+                                            <option value="dikirim">📦 Sudah Dikirim</option>
+                                            <option value="diterima">✅ Pesanan Diterima</option>
+                                        </select>
+
+                                        <button type="submit" name="update_status"
+                                            class="w-full py-2.5 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg transition cursor-pointer text-sm">
+                                            ✅ Konfirmasi Pembayaran
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+
+                    <?php if (count($pesanan_perlu_verifikasi) > 3): ?>
+                        <div class="text-center pt-4 border-t border-gray-100">
+                            <a href="pesanan.php" class="text-sm text-yellow-700 hover:text-yellow-900 font-medium">
+                                Lihat <?= count($pesanan_perlu_verifikasi) - 3 ?> pesanan lainnya →
+                            </a>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <!-- ==================== SECTION PESANAN DIPROSES ==================== -->
+            <?php if ($status_verifikasi === 'disetujui' && count($pesanan_diproses) > 0): ?>
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden mb-8">
+                <div class="p-6 border-b border-gray-100 flex items-center justify-between">
+                    <h3 class="font-semibold text-lg text-gray-900 flex items-center gap-2">
+                        <span class="text-2xl">🔨</span>
+                        Sedang Diproses
+                        <?php if (count($pesanan_diproses) > 0): ?>
+                            <span class="px-3 py-1 bg-blue-500 text-white text-xs font-bold rounded-full">
+                                <?= count($pesanan_diproses) ?>
+                            </span>
+                        <?php endif; ?>
+                    </h3>
+                    <a href="pesanan.php" class="text-sm text-gray-600 hover:text-gray-900 font-medium">
+                        Lihat Semua →
+                    </a>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 border-b border-gray-200">
+                            <tr>
+                                <th class="px-4 py-3 text-left font-semibold text-gray-700">ID</th>
+                                <th class="px-4 py-3 text-left font-semibold text-gray-700">Pembeli</th>
+                                <th class="px-4 py-3 text-left font-semibold text-gray-700">Produk</th>
+                                <th class="px-4 py-3 text-left font-semibold text-gray-700">Total</th>
+                                <th class="px-4 py-3 text-center font-semibold text-gray-700">Update Status</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+                            <?php foreach ($pesanan_diproses as $pesanan): ?>
+                                <tr class="hover:bg-gray-50">
+                                    <td class="px-4 py-3 font-mono text-xs">#<?= substr($pesanan['checkout_batch_id'], -6) ?></td>
+                                    <td class="px-4 py-3">
+                                        <div>
+                                            <p class="font-medium text-gray-900"><?= htmlspecialchars($pesanan['nama_pembeli']) ?></p>
+                                            <p class="text-xs text-gray-500"><?= htmlspecialchars($pesanan['no_telepon']) ?></p>
+                                        </div>
+                                    </td>
+                                    <td class="px-4 py-3">
+                                        <p class="font-medium text-gray-900"><?= htmlspecialchars($pesanan['nama_produk']) ?></p>
+                                        <p class="text-xs text-gray-500">Qty: <?= $pesanan['jumlah'] ?></p>
+                                    </td>
+                                    <td class="px-4 py-3 font-semibold text-green-600">
+                                        Rp <?= number_format($pesanan['total_harga'], 0, ',', '.') ?>
+                                    </td>
+                                    <td class="px-4 py-3 text-center">
+                                        <form method="POST" class="inline-flex items-center gap-2">
+                                            <input type="hidden" name="transaksi_id" value="<?= $pesanan['id'] ?>">
+                                            <input type="hidden" name="status" value="dibayar">
+                                            <select name="shipping_status" onchange="this.form.submit()" 
+                                                class="px-3 py-1.5 border border-gray-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer">
+                                                <option value="diproses" <?= $pesanan['shipping_status'] === 'diproses' ? 'selected' : '' ?>>🔨 Diproses</option>
+                                                <option value="dikirim" <?= $pesanan['shipping_status'] === 'dikirim' ? 'selected' : '' ?>>📦 Dikirim</option>
+                                                <option value="diterima" <?= $pesanan['shipping_status'] === 'diterima' ? 'selected' : '' ?>>✅ Diterima</option>
+                                            </select>
+                                        </form>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
             <?php endif; ?>
 
             <!-- PRODUK SECTION -->

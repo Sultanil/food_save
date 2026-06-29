@@ -1,5 +1,5 @@
 <?php
-// checkout.php - Checkout dari keranjang (multi-item) - PDO + AJAX
+// checkout.php - Checkout dari keranjang - PDO + AJAX
 session_start();
 require_once 'config/database.php';
 require_once 'includes/session_check.php';
@@ -30,6 +30,37 @@ function jsonResponse($status, $message, $extra = [])
 // ==================== AMBIL DATA USER ====================
 $user_id = $_SESSION['user_id'] ?? $_SESSION['id_user'] ?? 0;
 $kode_pos_pembeli = $_SESSION['kode_pos'] ?? '';
+
+// ==================== AMBIL PAYMENT METHODS DARI KERANJANG ====================
+$stmt_sellers = $pdo->prepare("
+    SELECT DISTINCT p.penjual_id, pj.nama_toko
+    FROM keranjang k
+    JOIN produk p ON k.produk_id = p.id
+    JOIN penjual pj ON p.penjual_id = pj.id
+    WHERE k.user_id = ?
+");
+$stmt_sellers->execute([$user_id]);
+$sellers_in_cart = $stmt_sellers->fetchAll(PDO::FETCH_ASSOC);
+
+$all_payment_methods = [];
+$seller_ids = array_column($sellers_in_cart, 'penjual_id');
+
+if (!empty($seller_ids)) {
+    $placeholders = implode(',', array_fill(0, count($seller_ids), '?'));
+    $stmt_pm = $pdo->prepare("
+        SELECT spm.*, pj.nama_toko 
+        FROM seller_payment_methods spm
+        JOIN penjual pj ON spm.penjual_id = pj.id
+        WHERE spm.penjual_id IN ($placeholders) AND spm.is_active = 1 
+        ORDER BY spm.is_default DESC, spm.created_at ASC
+    ");
+    $stmt_pm->execute($seller_ids);
+    $all_payment_methods = $stmt_pm->fetchAll(PDO::FETCH_ASSOC);
+}
+
+// Group by type
+$bank_accounts = array_filter($all_payment_methods, fn($m) => $m['payment_type'] === 'bank_transfer');
+$qris_list = array_filter($all_payment_methods, fn($m) => $m['payment_type'] === 'qris');
 
 // ==================== AMBIL ALAMAT USER ====================
 $stmt = $pdo->prepare("
@@ -72,21 +103,19 @@ if (empty($cart_items)) {
     }
 }
 
-// ==================== HITUNG ONGKIR KONSOLIDASI ====================
-$seller_positions = array_unique(array_filter(array_column($cart_items, 'penjual_kode_pos')));
-$hasil_konsolidasi = hitungBiayaKonsolidasi($pdo, $seller_positions, $kode_pos_pembeli);
-$ongkir_konsolidasi = $hasil_konsolidasi['ongkir'];
-$biaya_layanan = $hasil_konsolidasi['biaya_layanan'];
+// ==================== HITUNG ONGKIR (LOGIKA BARU) ====================
+// Ongkir berdasarkan jarak Hub (Balaikota) ke kelurahan pembeli
+// Rumus: Jarak (km) × Rp 750, Minimum Rp 3.000
+$ongkir_delivery = hitungOngkir($pdo, $kode_pos_pembeli);
+$biaya_layanan = BIAYA_LAYANAN_DEFAULT; // Rp 5.000
+$ongkir_konsolidasi = $ongkir_delivery;
 
 // ==================== DEFAULT VALUES ====================
-$nama = $_SESSION['nama_lengkap'] ?? $_SESSION['nama'] ?? '';
-$telepon = '';
-$alamat = '';
 $kode_voucher = '';
 $diskon = 0;
 $pembayaran = 'Transfer Bank';
 $pengiriman = 'foodsave';
-$ongkir = $ongkir_konsolidasi;
+$ongkir = $ongkir_delivery;
 $pesan = '';
 $pesan_class = '';
 
@@ -102,7 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($pengiriman === 'pickup') {
         $ongkir = 0;
     } else {
-        $ongkir = $ongkir_konsolidasi;
+        $ongkir = $ongkir_delivery;
     }
 
     // Voucher logic
@@ -127,7 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // Hitung total
-    $total_bayar = $subtotal + $biaya_layanan + $ongkir - $diskon;
+    $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
 
     // ==================== HANDLE "TERAPKAN VOUCHER" (AJAX) ====================
     if (isset($_POST['apply_voucher'])) {
@@ -254,7 +283,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Pastikan total_bayar selalu dihitung dengan benar
-$ongkir = ($pengiriman === 'pickup') ? 0 : $ongkir_konsolidasi;
+$ongkir = ($pengiriman === 'pickup') ? 0 : $ongkir_delivery;
 $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
 ?>
 <!DOCTYPE html>
@@ -473,13 +502,7 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                                         <div class="flex items-center gap-2 mb-1">
                                             <span class="font-semibold text-gray-900">FoodSave Delivery</span>
                                         </div>
-                                        <p class="text-sm text-gray-500 mb-2">Pengiriman teroptimasi via hub • Rute terdekat dari semua penjual</p>
-
-                                        <?php if (isset($hasil_konsolidasi) && $pengiriman === 'foodsave'): ?>
-                                            <div class="text-xs text-gray-400 space-y-0.5 mb-2">
-                                                <p>📍 Total jarak: <strong class="text-gray-600"><?= $hasil_konsolidasi['total_jarak'] ?> km</strong></p>
-                                            </div>
-                                        <?php endif; ?>
+                                        <p class="text-sm text-gray-500 mb-2">Estimasi 1-3 jam • Ongkir dari Hub: Rp 750/km</p>
 
                                         <?php if (empty($kode_pos_pembeli)): ?>
                                             <p class="text-xs text-amber-600 bg-amber-50 inline-block px-2 py-1 rounded mt-1">
@@ -490,9 +513,9 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
 
                                     <div class="flex-shrink-0 text-right">
                                         <span class="block text-lg font-bold text-green-600">
-                                            <?= empty($kode_pos_pembeli) ? '-' : 'Rp ' . number_format($ongkir_konsolidasi, 0, ',', '.') ?>
+                                            <?= empty($kode_pos_pembeli) ? '-' : 'Rp ' . number_format($ongkir_delivery, 0, ',', '.') ?>
                                         </span>
-                                        <?php if (!empty($kode_pos_pembeli) && $ongkir_konsolidasi > 0): ?>
+                                        <?php if (!empty($kode_pos_pembeli) && $ongkir_delivery > 0): ?>
                                             <span class="text-xs text-gray-400">ongkir</span>
                                         <?php endif; ?>
                                     </div>
@@ -530,34 +553,98 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                         </div>
                     </div>
 
-                    <!-- Metode Pembayaran -->
-                    <div id="section-payment" class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                    <!-- Pembayaran -->
+                    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                         <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                            <span class="w-8 h-8 bg-green-500/10 rounded-lg flex items-center justify-center text-green-600">💳</span>
+                            <span class="w-8 h-8 bg-brand/10 rounded-lg flex items-center justify-center text-brand">💳</span>
                             Metode Pembayaran
                         </h2>
 
-                        <div class="grid grid-cols-2 gap-3">
-                            <label class="radio-card flex-col items-center text-center payment-option <?= $pembayaran === 'Transfer Bank' ? 'selected' : '' ?>">
-                                <input type="radio" name="pembayaran" value="Transfer Bank" class="sr-only"
-                                    <?= $pembayaran === 'Transfer Bank' ? 'checked' : '' ?>>
-                                <div class="text-3xl mb-2">🏦</div>
-                                <span class="font-semibold text-gray-900 text-sm">Transfer Bank</span>
-                                <span class="text-xs text-gray-500 mt-1">BCA, Mandiri, BRI, BNI</span>
-                            </label>
+                        <?php if (empty($all_payment_methods)): ?>
+                            <div class="p-4 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-sm">
+                                ⚠️ Penjual di keranjang belum menambahkan metode pembayaran. Silakan hubungi penjual untuk konfirmasi.
+                            </div>
+                            <input type="hidden" name="pembayaran" value="Transfer Manual">
+                        <?php else: ?>
 
-                            <label class="radio-card flex-col items-center text-center payment-option <?= $pembayaran === 'QRIS' ? 'selected' : '' ?>">
-                                <input type="radio" name="pembayaran" value="QRIS" class="sr-only"
-                                    <?= $pembayaran === 'QRIS' ? 'checked' : '' ?>>
-                                <div class="text-3xl mb-2">📱</div>
-                                <span class="font-semibold text-gray-900 text-sm">QRIS</span>
-                                <span class="text-xs text-gray-500 mt-1">Scan & bayar dengan e-wallet</span>
-                            </label>
-                        </div>
+                            <!-- BANK TRANSFER -->
+                            <?php if (!empty($bank_accounts)): ?>
+                                <div class="mb-4">
+                                    <h3 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                                        🏦 Transfer Bank
+                                    </h3>
+                                    <div class="space-y-3">
+                                        <?php foreach ($bank_accounts as $bank): ?>
+                                            <label class="flex items-start gap-3 p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand transition has-[:checked]:border-brand has-[:checked]:bg-brand/5">
+                                                <input type="radio"
+                                                    name="pembayaran"
+                                                    value="Transfer Bank - <?= htmlspecialchars($bank['bank_name']) ?>"
+                                                    class="mt-1 w-4 h-4 text-brand"
+                                                    <?= $bank['is_default'] ? 'checked' : '' ?>>
+                                                <div class="flex-1">
+                                                    <div class="flex items-center gap-2 mb-1 flex-wrap">
+                                                        <span class="font-semibold text-gray-900"><?= htmlspecialchars($bank['bank_name']) ?></span>
+                                                        <span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                                                            <?= htmlspecialchars($bank['nama_toko']) ?>
+                                                        </span>
+                                                        <?php if ($bank['is_default']): ?>
+                                                            <span class="px-2 py-0.5 bg-brand/10 text-brand text-xs font-bold rounded-full">⭐ Default</span>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                    <div class="ml-0 sm:ml-7 space-y-1 text-sm">
+                                                        <p class="text-gray-700">
+                                                            <span class="text-gray-500">No. Rek:</span>
+                                                            <strong class="font-mono text-base"><?= htmlspecialchars($bank['account_number']) ?></strong>
+                                                        </p>
+                                                        <p class="text-gray-700">
+                                                            <span class="text-gray-500">A/N:</span>
+                                                            <?= htmlspecialchars($bank['account_holder']) ?>
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </label>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </div>
+                            <?php endif; ?>
 
-                        <div class="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
-                            <p>💡 <strong>Catatan:</strong> Setelah checkout, Anda akan diarahkan ke halaman pembayaran dengan instruksi lengkap sesuai metode yang dipilih.</p>
-                        </div>
+                            <!-- QRIS -->
+                            <?php if (!empty($qris_list)): ?>
+                                <div class="mb-4">
+                                    <h3 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                                        📱 QRIS
+                                    </h3>
+                                    <div class="space-y-3">
+                                        <?php foreach ($qris_list as $qris): ?>
+                                            <label class="flex items-start gap-3 p-4 border-2 border-gray-200 rounded-xl cursor-pointer hover:border-brand transition has-[:checked]:border-brand has-[:checked]:bg-brand/5">
+                                                <input type="radio"
+                                                    name="pembayaran"
+                                                    value="QRIS - <?= htmlspecialchars($qris['nama_toko']) ?>"
+                                                    class="mt-1 w-4 h-4 text-brand"
+                                                    <?= $qris['is_default'] ? 'checked' : '' ?>>
+                                                <div class="flex-1">
+                                                    <div class="flex items-center gap-2 mb-1 flex-wrap">
+                                                        <span class="font-semibold text-gray-900">QRIS Code</span>
+                                                        <span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                                                            <?= htmlspecialchars($qris['nama_toko']) ?>
+                                                        </span>
+                                                    </div>
+                                                    <p class="text-sm text-gray-600 ml-0 sm:ml-7">Scan kode QR untuk pembayaran instan</p>
+                                                </div>
+                                            </label>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </div>
+                            <?php endif; ?>
+
+                            <!-- Info Pembayaran -->
+                            <div class="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                <p class="text-xs text-blue-800">
+                                    ℹ️ <strong>Cara Bayar:</strong> Pilih metode di atas, lalu klik "Bayar Sekarang". Anda akan diarahkan ke halaman upload bukti pembayaran.
+                                </p>
+                            </div>
+
+                        <?php endif; ?>
                     </div>
 
                     <!-- Voucher -->
@@ -679,25 +766,180 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
 
     <!-- AJAX Script untuk Checkout -->
     <script>
+        // ==================== FUNGSI GLOBAL (di luar jQuery ready) ====================
+
+        // Fungsi pilih alamat dari dropdown
+        async function pilihAlamat(jsonData) {
+            console.log('🎯 [CHECKOUT] pilihAlamat called!');
+            console.log('   Data:', jsonData);
+
+            if (jsonData === 'new') {
+                window.location.href = 'alamat_saya.php';
+                return;
+            }
+
+            if (!jsonData) {
+                console.log('   ⚠️ jsonData kosong!');
+                return;
+            }
+
+            try {
+                const alamat = JSON.parse(jsonData);
+                console.log('   ✅ Parsed alamat:', alamat);
+
+                // Fill form dengan data alamat
+                document.querySelector('input[name="nama"]').value = alamat.nama_penerima || '';
+                document.querySelector('input[name="telepon"]').value = alamat.telepon || '';
+                document.querySelector('textarea[name="alamat"]').value = alamat.alamat_lengkap || '';
+
+                // Update kode pos display
+                const kodePosElement = document.querySelector('p.text-xs.text-gray-400');
+                if (kodePosElement && alamat.kode_pos) {
+                    kodePosElement.innerHTML = `📮 Kode Pos: <strong>${alamat.kode_pos}</strong>`;
+                    console.log('   📮 Kode pos:', alamat.kode_pos);
+
+                    // 🔄 FETCH ONGKIR BARU VIA AJAX
+                    await updateOngkir(alamat.kode_pos);
+                }
+            } catch (e) {
+                console.error('   ❌ Error parsing alamat:', e);
+            }
+        }
+
+        // Fungsi update ongkir via AJAX
+        async function updateOngkir(kodePos) {
+            console.log('🔄 [CHECKOUT UPDATE ONGKIR] Mulai untuk kode pos:', kodePos);
+
+            try {
+                const response = await fetch(`assets/api/get_ongkir.php?kode_pos=${kodePos}`);
+                const data = await response.json();
+
+                console.log('📡 [CHECKOUT UPDATE ONGKIR] Response:', data);
+
+                if (data.success) {
+                    console.log('✅ [CHECKOUT UPDATE ONGKIR] API berhasil!');
+                    console.log('   - Jarak:', data.jarak_km, 'km');
+                    console.log('   - Ongkir baru:', data.formatted_ongkir);
+
+                    // 1. Update variabel global
+                    window.ongkirDelivery = data.ongkir;
+                    console.log('   - window.ongkirDelivery =', window.ongkirDelivery);
+
+                    // 2. Update radio button delivery
+                    const radioDelivery = document.querySelector('input[name="pengiriman"][value="foodsave"]');
+
+                    if (radioDelivery) {
+                        console.log('✅ [CHECKOUT] Radio delivery ditemukan!');
+
+                        // Update tampilan harga di label
+                        const label = radioDelivery.closest('.shipping-option');
+                        if (label) {
+                            console.log('   - Label ditemukan');
+
+                            // Update harga di elemen font-bold
+                            const priceElement = label.querySelector('.font-bold');
+                            if (priceElement) {
+                                priceElement.textContent = data.formatted_ongkir;
+                                console.log('   - Updated price text to:', data.formatted_ongkir);
+                            }
+                        }
+                    } else {
+                        console.error('   ❌ Radio delivery TIDAK ditemukan!');
+                    }
+
+                    // 3. Update summary di kanan
+                    const ongkirDisplay = document.getElementById('displayOngkir');
+                    if (ongkirDisplay) {
+                        console.log('✅ [CHECKOUT] Element #displayOngkir ditemukan');
+
+                        const checkedRadio = document.querySelector('input[name="pengiriman"]:checked');
+                        const isCheckedPickup = checkedRadio && checkedRadio.value === 'pickup';
+
+                        if (isCheckedPickup) {
+                            ongkirDisplay.innerHTML = 'Gratis (Pick Up) <span class="text-xs text-gray-400 block">(Ambil Sendiri)</span>';
+                            console.log('   - Pickup dipilih, ongkir = Gratis');
+                        } else {
+                            ongkirDisplay.innerHTML = `${data.formatted_ongkir} <span class="text-xs text-gray-400 block">(FoodSave Delivery)</span>`;
+                            console.log('   - Delivery dipilih, ongkir =', data.formatted_ongkir);
+                        }
+                    }
+
+                    // 4. Update total bayar
+                    console.log('🧮 [CHECKOUT] Memanggil updateTotalDisplay()...');
+                    updateTotalDisplay();
+
+                    console.log('✅ [CHECKOUT UPDATE ONGKIR] SELESAI!');
+
+                } else {
+                    console.error('❌ [CHECKOUT] API return error:', data.message);
+                }
+            } catch (error) {
+                console.error('❌ [CHECKOUT] Exception:', error);
+            }
+        }
+
+        // Fungsi update total display
+        function updateTotalDisplay() {
+            console.log('💰 [CHECKOUT HITUNG TOTAL] Mulai...');
+
+            // Ambil nilai dari window
+            const subtotal = window.subtotal || 0;
+            const biayaLayanan = window.biayaLayanan || 0;
+            const diskon = window.diskon || 0;
+
+            // Ambil nilai pengiriman yang dipilih
+            const pengirimanRadio = document.querySelector('input[name="pengiriman"]:checked');
+            const isCheckedPickup = pengirimanRadio && pengirimanRadio.value === 'pickup';
+
+            // Tentukan ongkir
+            let currentOngkir = 0;
+            if (isCheckedPickup) {
+                currentOngkir = 0;
+                console.log('   - Pickup dipilih, ongkir = 0');
+            } else {
+                // Delivery - pakai dari window
+                currentOngkir = window.ongkirDelivery || 0;
+                console.log('   - Delivery dipilih, ongkir =', currentOngkir);
+            }
+
+            // Hitung total
+            const total = subtotal + biayaLayanan + currentOngkir - diskon;
+            const totalFormatted = formatRupiah(Math.max(0, total));
+
+            console.log('   - Total:', totalFormatted);
+            console.log('     (Subtotal:', formatRupiah(subtotal),
+                '+ Layanan:', formatRupiah(biayaLayanan),
+                '+ Ongkir:', formatRupiah(currentOngkir),
+                '- Diskon:', formatRupiah(diskon) + ')');
+
+            // Update tampilan
+            $('#displayTotal').text(totalFormatted);
+            $('#btnBayarText').html('Bayar Sekarang • ' + totalFormatted);
+
+            console.log('💰 [CHECKOUT HITUNG TOTAL] SELESAI!');
+        }
+
+        // Fungsi format rupiah (global)
+        function formatRupiah(angka) {
+            return 'Rp ' + angka.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+        }
+
+        // ==================== JQUERY READY ====================
         $(document).ready(function() {
             // ==================== VARIABEL GLOBAL ====================
-            const subtotal = <?= $subtotal ?>;
-            const biayaLayanan = <?= $biaya_layanan ?>;
-            let ongkir = <?= $ongkir_konsolidasi ?>;
-            let diskon = <?= $diskon ?>;
-            const ongkirPickup = 0;
+            window.subtotal = <?= $subtotal ?>;
+            window.biayaLayanan = <?= $biaya_layanan ?>;
+            window.ongkir = <?= $ongkir_konsolidasi ?>;
+            window.diskon = <?= $diskon ?>;
+            window.ongkirDelivery = <?= $ongkir_konsolidasi ?>;
+
+            console.log('💾 [CHECKOUT] Initial values:');
+            console.log('   - subtotal:', window.subtotal);
+            console.log('   - biayaLayanan:', window.biayaLayanan);
+            console.log('   - ongkirDelivery:', window.ongkirDelivery);
+            console.log('   - diskon:', window.diskon);
 
             // ==================== HELPER FUNCTIONS ====================
-            function formatRupiah(angka) {
-                return 'Rp ' + angka.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-            }
-
-            function updateTotalDisplay() {
-                const total = subtotal + biayaLayanan + ongkir - diskon;
-                $('#displayTotal').text(formatRupiah(Math.max(0, total)));
-                $('#btnBayarText').html('Bayar Sekarang • ' + formatRupiah(Math.max(0, total)));
-            }
-
             function showMessage(type, message) {
                 const alertClass = type === 'success' ?
                     'bg-green-50 border-green-200 text-green-700' :
@@ -709,12 +951,10 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                     .text(message)
                     .show();
 
-                // Scroll ke atas
                 $('html, body').animate({
                     scrollTop: $('#ajaxMessage').offset().top - 100
                 }, 500);
 
-                // Auto-hide setelah 5 detik
                 setTimeout(() => {
                     $('#ajaxMessage').fadeOut();
                 }, 5000);
@@ -727,12 +967,12 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                         .removeClass('bg-green-600 hover:bg-green-700')
                         .addClass('bg-gray-400 cursor-not-allowed');
                     $('#btnBayarText').html(`
-                    <svg class="spinner w-5 h-5 inline mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Memproses pesanan...
-                `);
+                <svg class="spinner w-5 h-5 inline mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Memproses pesanan...
+            `);
                 } else {
                     btn.prop('disabled', false)
                         .removeClass('bg-gray-400 cursor-not-allowed')
@@ -745,7 +985,6 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
             $('#checkoutForm').on('submit', function(e) {
                 e.preventDefault();
 
-                // Validasi client-side
                 const nama = $('input[name="nama"]').val().trim();
                 const telepon = $('input[name="telepon"]').val().trim();
                 const alamat = $('textarea[name="alamat"]').val().trim();
@@ -769,8 +1008,6 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                     success: function(response) {
                         if (response.status === 'success') {
                             showMessage('success', response.message);
-
-                            // Redirect ke halaman pembayaran
                             setTimeout(function() {
                                 window.location.href = response.redirect_url;
                             }, 1500);
@@ -781,14 +1018,11 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                     },
                     error: function(xhr, status, error) {
                         console.error('AJAX Error:', error);
-                        console.error('Response:', xhr.responseText);
-
                         let errorMsg = '❌ Terjadi kesalahan sistem.';
                         try {
                             const response = JSON.parse(xhr.responseText);
                             if (response.message) errorMsg = response.message;
                         } catch (e) {}
-
                         showMessage('error', errorMsg);
                         setLoading(false);
                     }
@@ -807,12 +1041,12 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
 
                 const originalText = btn.text();
                 btn.prop('disabled', true).html(`
-                <svg class="spinner w-4 h-4 inline mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Memproses...
-            `);
+            <svg class="spinner w-4 h-4 inline mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Memproses...
+        `);
 
                 $.ajax({
                     url: window.location.href,
@@ -830,32 +1064,23 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                     },
                     success: function(response) {
                         if (response.status === 'success') {
-                            // Update diskon
-                            diskon = response.diskon;
-
-                            // Update tampilan
+                            window.diskon = response.diskon;
                             $('#displayDiskon').text('- ' + response.formatted_diskon);
                             $('#displayDiskonRow').show();
                             $('#displayTotal').text(response.formatted_total);
-
-                            // Update status voucher
                             $('#voucherStatus').html(`
-                            <p class="text-xs text-green-600 mt-2 flex items-center gap-1">
-                                ✅ Voucher <strong>${response.kode_voucher}</strong> aktif: Potongan ${response.formatted_diskon}
-                            </p>
-                        `);
-
-                            // Update tombol bayar
+                        <p class="text-xs text-green-600 mt-2 flex items-center gap-1">
+                            ✅ Voucher <strong>${response.kode_voucher}</strong> aktif: Potongan ${response.formatted_diskon}
+                        </p>
+                    `);
                             updateTotalDisplay();
-
                             showMessage('success', response.message);
                         } else {
                             showMessage('error', response.message);
                             $('#voucherStatus').html(`
-                            <p class="text-xs text-red-500 mt-2">❌ ${response.message}</p>
-                        `);
+                        <p class="text-xs text-red-500 mt-2">❌ ${response.message}</p>
+                    `);
                         }
-
                         btn.prop('disabled', false).text(originalText);
                     },
                     error: function() {
@@ -868,8 +1093,8 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
             // ==================== HANDLE PENGIRIMAN CHANGE ====================
             $('input[name="pengiriman"]').on('change', function() {
                 const value = $(this).val();
+                console.log('🚚 [CHECKOUT] Pengiriman berubah ke:', value);
 
-                // Update style
                 $('.shipping-option').removeClass('border-green-500 bg-green-50/40 shadow-md shadow-green-500/10 border-blue-500 bg-blue-50/40 shadow-md shadow-blue-500/10')
                     .addClass('border-gray-200 bg-white');
 
@@ -877,14 +1102,16 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                     $(this).closest('.shipping-option')
                         .removeClass('border-gray-200 bg-white')
                         .addClass('border-green-500 bg-green-50/40 shadow-md shadow-green-500/10');
-                    ongkir = <?= $ongkir_konsolidasi ?>;
-                    $('#displayOngkir').html('Rp <?= number_format($ongkir_konsolidasi, 0, ',', '.') ?> <span class="text-xs text-gray-400 block">(FoodSave Delivery)</span>');
+
+                    const currentOngkir = window.ongkirDelivery || <?= $ongkir_konsolidasi ?>;
+                    $('#displayOngkir').html(formatRupiah(currentOngkir) + ' <span class="text-xs text-gray-400 block">(FoodSave Delivery)</span>');
+                    console.log('   - Delivery dipilih, ongkir =', formatRupiah(currentOngkir));
                 } else if (value === 'pickup') {
                     $(this).closest('.shipping-option')
                         .removeClass('border-gray-200 bg-white')
                         .addClass('border-blue-500 bg-blue-50/40 shadow-md shadow-blue-500/10');
-                    ongkir = ongkirPickup;
                     $('#displayOngkir').html('Gratis (Pick Up) <span class="text-xs text-gray-400 block">(Ambil Sendiri)</span>');
+                    console.log('   - Pickup dipilih, ongkir = Gratis');
                 }
 
                 updateTotalDisplay();
@@ -896,28 +1123,6 @@ $total_bayar = max(0, $subtotal + $biaya_layanan + $ongkir - $diskon);
                 $(this).closest('.payment-option').addClass('selected');
             });
         });
-        // Fungsi pilih alamat dari dropdown
-        function pilihAlamat(jsonData) {
-            if (jsonData === 'new') {
-                window.location.href = 'alamat_saya.php';
-                return;
-            }
-
-            if (!jsonData) return;
-
-            const alamat = JSON.parse(jsonData);
-
-            // Fill form dengan data alamat
-            document.querySelector('input[name="nama"]').value = alamat.nama_penerima;
-            document.querySelector('input[name="telepon"]').value = alamat.telepon;
-            document.querySelector('textarea[name="alamat"]').value = alamat.alamat_lengkap;
-
-            // Update kode pos (jika ada elemennya)
-            const kodePosElement = document.querySelector('p.text-xs.text-gray-400');
-            if (kodePosElement && alamat.kode_pos) {
-                kodePosElement.innerHTML = `📮 Kode Pos: <strong>${alamat.kode_pos}</strong>`;
-            }
-        }
     </script>
 
 </body>

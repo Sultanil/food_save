@@ -572,6 +572,73 @@ $kategori_icons = [
         <div id="grid-toko" class="max-w-6xl mx-auto px-6 py-6">
             <!-- Diisi oleh JavaScript -->
         </div>
+        <!-- ═══ EDUKASI FOOD WASTE ═══ -->
+        <div class="max-w-6xl mx-auto px-6 py-10">
+            <div class="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-3xl p-8 shadow-sm">
+                <div class="grid md:grid-cols-2 gap-8 items-center">
+                    <!-- Left: Content -->
+                    <div>
+                        <div class="inline-flex items-center gap-2 bg-green-100 px-4 py-2 rounded-full text-sm font-semibold text-green-700 mb-4">
+                            <i class="fas fa-leaf"></i>
+                            Misi Kami
+                        </div>
+                        <h2 class="text-3xl font-extrabold text-gray-900 mb-4">
+                            Bersama Mengurangi <span class="gradient-text">Food Waste</span>
+                        </h2>
+                        <p class="text-gray-700 mb-6 leading-relaxed">
+                            Tahukah kamu? <strong>1/3 makanan di dunia terbuang sia-sia</strong> setiap tahun.
+                            Dengan berbelanja di FoodSave, kamu tidak hanya menghemat uang, tapi juga
+                            <strong>menyelamatkan makanan</strong> dan membantu lingkungan.
+                        </p>
+                        <div class="flex flex-wrap gap-4">
+                            <div class="flex items-center gap-2">
+                                <div class="w-10 h-10 bg-green-500 rounded-xl flex items-center justify-center text-white">
+                                    <i class="fas fa-check"></i>
+                                </div>
+                                <div>
+                                    <div class="font-bold text-gray-900">Ramah Lingkungan</div>
+                                    <div class="text-xs text-gray-600">Kurangi emisi karbon</div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <div class="w-10 h-10 bg-green-500 rounded-xl flex items-center justify-center text-white">
+                                    <i class="fas fa-piggy-bank"></i>
+                                </div>
+                                <div>
+                                    <div class="font-bold text-gray-900">Hemat Uang</div>
+                                    <div class="text-xs text-gray-600">Diskon hingga 70%</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right: Visual -->
+                    <div class="relative">
+                        <div class="bg-white rounded-2xl p-6 shadow-lg">
+                            <div class="text-center mb-4">
+                                <div class="text-6xl mb-2">🌍</div>
+                                <h3 class="text-xl font-bold text-gray-900 mb-2">Dampak Positif Kamu</h3>
+                                <p class="text-sm text-gray-600">Setiap pembelian membantu mengurangi food waste</p>
+                            </div>
+                            <div class="space-y-3">
+                                <div class="flex items-center justify-between p-3 bg-green-50 rounded-xl">
+                                    <span class="text-sm font-semibold text-gray-700">Makanan Diselamatkan</span>
+                                    <span class="text-lg font-bold text-green-600"><?= $makanan_terselamatkan ?> kg</span>
+                                </div>
+                                <div class="flex items-center justify-between p-3 bg-blue-50 rounded-xl">
+                                    <span class="text-sm font-semibold text-gray-700">CO₂ Berkurang</span>
+                                    <span class="text-lg font-bold text-blue-600"><?= round($makanan_terselamatkan * 2.5, 1) ?> kg</span>
+                                </div>
+                                <div class="flex items-center justify-between p-3 bg-yellow-50 rounded-xl">
+                                    <span class="text-sm font-semibold text-gray-700">Uang Dihemat</span>
+                                    <span class="text-lg font-bold text-yellow-600">Rp <?= number_format($makanan_terselamatkan * 25000, 0, ',', '.') ?></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- Empty State -->
         <?php if (empty($produk_list) && !empty($filter_kategori)): ?>
@@ -584,74 +651,6 @@ $kategori_icons = [
                 </a>
             </div>
         <?php endif; ?>
-    </div>
-
-    <!-- ═══ EDUKASI FOOD WASTE ═══ -->
-    <div class="max-w-6xl mx-auto px-6 py-10">
-        <div class="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-3xl p-8 shadow-sm">
-            <div class="grid md:grid-cols-2 gap-8 items-center">
-                <!-- Left: Content -->
-                <div>
-                    <div class="inline-flex items-center gap-2 bg-green-100 px-4 py-2 rounded-full text-sm font-semibold text-green-700 mb-4">
-                        <i class="fas fa-leaf"></i>
-                        Misi Kami
-                    </div>
-                    <h2 class="text-3xl font-extrabold text-gray-900 mb-4">
-                        Bersama Mengurangi <span class="gradient-text">Food Waste</span>
-                    </h2>
-                    <p class="text-gray-700 mb-6 leading-relaxed">
-                        Tahukah kamu? <strong>1/3 makanan di dunia terbuang sia-sia</strong> setiap tahun.
-                        Dengan berbelanja di FoodSave, kamu tidak hanya menghemat uang, tapi juga
-                        <strong>menyelamatkan makanan</strong> dan membantu lingkungan.
-                    </p>
-                    <div class="flex flex-wrap gap-4">
-                        <div class="flex items-center gap-2">
-                            <div class="w-10 h-10 bg-green-500 rounded-xl flex items-center justify-center text-white">
-                                <i class="fas fa-check"></i>
-                            </div>
-                            <div>
-                                <div class="font-bold text-gray-900">Ramah Lingkungan</div>
-                                <div class="text-xs text-gray-600">Kurangi emisi karbon</div>
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <div class="w-10 h-10 bg-green-500 rounded-xl flex items-center justify-center text-white">
-                                <i class="fas fa-piggy-bank"></i>
-                            </div>
-                            <div>
-                                <div class="font-bold text-gray-900">Hemat Uang</div>
-                                <div class="text-xs text-gray-600">Diskon hingga 70%</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Right: Visual -->
-                <div class="relative">
-                    <div class="bg-white rounded-2xl p-6 shadow-lg">
-                        <div class="text-center mb-4">
-                            <div class="text-6xl mb-2">🌍</div>
-                            <h3 class="text-xl font-bold text-gray-900 mb-2">Dampak Positif Kamu</h3>
-                            <p class="text-sm text-gray-600">Setiap pembelian membantu mengurangi food waste</p>
-                        </div>
-                        <div class="space-y-3">
-                            <div class="flex items-center justify-between p-3 bg-green-50 rounded-xl">
-                                <span class="text-sm font-semibold text-gray-700">Makanan Diselamatkan</span>
-                                <span class="text-lg font-bold text-green-600"><?= $makanan_terselamatkan ?> kg</span>
-                            </div>
-                            <div class="flex items-center justify-between p-3 bg-blue-50 rounded-xl">
-                                <span class="text-sm font-semibold text-gray-700">CO₂ Berkurang</span>
-                                <span class="text-lg font-bold text-blue-600"><?= round($makanan_terselamatkan * 2.5, 1) ?> kg</span>
-                            </div>
-                            <div class="flex items-center justify-between p-3 bg-yellow-50 rounded-xl">
-                                <span class="text-sm font-semibold text-gray-700">Uang Dihemat</span>
-                                <span class="text-lg font-bold text-yellow-600">Rp <?= number_format($makanan_terselamatkan * 25000, 0, ',', '.') ?></span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
     </div>
 
     <!-- ═══ HALAMAN PRODUK TOKO ═══ -->

@@ -123,23 +123,67 @@ $top_stores = $pdo->query("
                 <!-- Auth Buttons -->
                 <div class="flex items-center gap-3">
                     <?php if (isset($_SESSION['sudah_login']) && $_SESSION['sudah_login'] === true): ?>
+
                         <?php if ($_SESSION['role'] === 'pembeli'): ?>
                             <a href="keranjang.php" class="relative p-2 text-gray-600 hover:text-primary transition">
                                 <i class="fas fa-shopping-cart text-xl"></i>
                                 <span class="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold w-5 h-5 rounded-full flex items-center justify-center">0</span>
                             </a>
                         <?php endif; ?>
-                        <a href="dashboardPenjual.php" class="hidden sm:block px-5 py-2.5 text-gray-700 hover:text-primary font-medium transition">
-                            Dashboard
-                        </a>
-                        <a href="logout.php" class="px-5 py-2.5 border-2 border-gray-300 text-gray-700 font-semibold rounded-xl hover:border-primary hover:text-primary transition">
-                            Logout
-                        </a>
+
+                        <!-- ✅ DROPDOWN PROFIL -->
+                        <div class="relative" id="profileDropdown">
+                            <button onclick="toggleProfileDropdown()" class="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-primary transition bg-gray-50 hover:bg-gray-100 px-3 py-2 rounded-xl border border-gray-200">
+                                <div class="w-7 h-7 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center text-white text-xs font-bold overflow-hidden">
+                                    <?php
+                                    $nama_user = $_SESSION['nama_lengkap'] ?? $_SESSION['nama'] ?? 'U';
+                                    $initial = strtoupper(substr($nama_user, 0, 1));
+                                    echo $initial;
+                                    ?>
+                                </div>
+                                <span class="hidden sm:block max-w-[100px] truncate"><?= htmlspecialchars($nama_user) ?></span>
+                                <i class="fas fa-chevron-down text-xs text-gray-400"></i>
+                            </button>
+
+                            <!-- Dropdown Menu -->
+                            <div id="profileDropdownMenu" class="hidden absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-gray-100 py-2 z-50">
+
+                                <!-- Menu Items -->
+                                <a href="edit_profil.php" class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition">
+                                    <span class="text-lg">✏️</span>
+                                    <span>Edit Profil</span>
+                                </a>
+                                <a href="alamat_saya.php" class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition">
+                                    <span class="text-lg">📍</span>
+                                    <span>Alamat Saya</span>
+                                </a>
+
+                                <?php if ($_SESSION['role'] === 'pembeli'): ?>
+                                    <a href="riwayat_pembelian.php" class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition">
+                                        <span class="text-lg">📦</span>
+                                        <span>Riwayat Pembelian</span>
+                                    </a>
+                                <?php elseif ($_SESSION['role'] === 'penjual'): ?>
+                                    <a href="dashboardPenjual.php" class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition">
+                                        <span class="text-lg">🏪</span>
+                                        <span>Dashboard Toko</span>
+                                    </a>
+                                <?php endif; ?>
+
+                                <div class="border-t border-gray-100 my-1"></div>
+
+                                <a href="logout.php" class="flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition">
+                                    <span class="text-lg">🚪</span>
+                                    <span>Logout</span>
+                                </a>
+                            </div>
+                        </div>
+
                     <?php else: ?>
                         <a href="LoginPage.php" class="px-5 py-2.5 text-gray-700 font-semibold hover:text-primary transition">
                             Masuk
                         </a>
-                        <a href="RegisterPage.php" class="px-5 py-2.5 gradient-primary text-white font-semibold rounded-xl hover:bg-primary-dark transition shadow-lg hover:shadow-xl">
+                        <a href="RegisterPage.php" class="px-5 py-2.5 text-gray-700 font-semibold hover:text-primary transition">
                             Daftar
                         </a>
                     <?php endif; ?>
@@ -216,8 +260,6 @@ $top_stores = $pdo->query("
             </div>
         </div>
     </section>
-
-    <!-- CATEGORIES SECTION -->
     <!-- CATEGORIES SECTION -->
     <section class="py-16 bg-gradient-to-b from-white to-green-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -501,6 +543,22 @@ $top_stores = $pdo->query("
                     }
                 }
             });
+        });
+
+        // Toggle Profile Dropdown
+        function toggleProfileDropdown() {
+            const menu = document.getElementById('profileDropdownMenu');
+            menu.classList.toggle('hidden');
+        }
+
+        // Tutup dropdown kalau klik di luar
+        document.addEventListener('click', function(event) {
+            const dropdown = document.getElementById('profileDropdown');
+            const menu = document.getElementById('profileDropdownMenu');
+
+            if (dropdown && menu && !dropdown.contains(event.target)) {
+                menu.classList.add('hidden');
+            }
         });
     </script>
 
