@@ -18,22 +18,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // 1. UPLOAD BUKTI BAYAR
     if (isset($_POST['upload_bukti'])) {
         $transaksi_id = (int)$_POST['transaksi_id'];
-        
+
         // Cek kepemilikan transaksi
         $check = $pdo->prepare("SELECT id FROM transaksi WHERE id = ? AND user_id = ?");
         $check->execute([$transaksi_id, $user_id]);
-        
+
         if ($check->rowCount() > 0) {
             if (isset($_FILES['bukti']) && $_FILES['bukti']['error'] === UPLOAD_ERR_OK) {
                 $ext = pathinfo($_FILES['bukti']['name'], PATHINFO_EXTENSION);
                 $filename = 'bukti_' . $transaksi_id . '_' . time() . '.' . $ext;
                 $target = 'uploads/' . $filename;
-                
+
                 // Buat folder uploads jika belum ada
                 if (!is_dir('uploads')) {
                     mkdir('uploads', 0777, true);
                 }
-                
+
                 if (move_uploaded_file($_FILES['bukti']['tmp_name'], $target)) {
                     try {
                         $upd = $pdo->prepare("UPDATE transaksi SET bukti_pembayaran = ?, status = 'dibayar' WHERE id = ?");
@@ -54,16 +54,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     }
-    
+
     // 2. BATALKAN PESANAN
     if (isset($_POST['batalkan_pesanan'])) {
         $transaksi_id = (int)$_POST['transaksi_id'];
         $alasan = trim($_POST['alasan_pembatalan'] ?? 'Dibatalkan oleh pembeli');
-        
+
         // Hanya bisa batalkan jika status pending
         $check = $pdo->prepare("SELECT id FROM transaksi WHERE id = ? AND user_id = ? AND status = 'pending'");
         $check->execute([$transaksi_id, $user_id]);
-        
+
         if ($check->rowCount() > 0) {
             try {
                 $upd = $pdo->prepare("UPDATE transaksi SET status = 'dibatalkan', alasan_pembatalan = ? WHERE id = ?");
@@ -76,15 +76,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     }
-    
+
     // 3. KONFIRMASI DITERIMA
     if (isset($_POST['konfirmasi_diterima'])) {
         $transaksi_id = (int)$_POST['transaksi_id'];
-        
+
         // Hanya bisa konfirmasi jika status dikirim
         $check = $pdo->prepare("SELECT id FROM transaksi WHERE id = ? AND user_id = ? AND status = 'dikirim'");
         $check->execute([$transaksi_id, $user_id]);
-        
+
         if ($check->rowCount() > 0) {
             try {
                 $upd = $pdo->prepare("UPDATE transaksi SET status = 'selesai', shipping_status = 'selesai' WHERE id = ?");
@@ -132,15 +132,19 @@ $status_labels = [
 ?>
 <!DOCTYPE html>
 <html lang="id">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Riwayat Belanja - FoodSave</title>
     <?php include 'includes/tailwind_config.php'; ?>
     <style>
-        .modal-overlay { backdrop-filter: blur(4px); }
+        .modal-overlay {
+            backdrop-filter: blur(4px);
+        }
     </style>
 </head>
+
 <body class="bg-gray-50 text-gray-800 min-h-screen">
 
     <!-- NAVBAR -->
@@ -148,6 +152,10 @@ $status_labels = [
         <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
             <a href="Index.php" class="font-bold text-xl text-brand flex items-center gap-2">
                 🌿 FoodSave
+            </a>
+
+            <a href="beri_ulasan.php" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                Beri Ulasan
             </a>
             <div class="flex items-center gap-3">
                 <a href="PromosiPage.php" class="text-sm text-gray-600 hover:text-brand font-medium">← Jelajahi Makanan Surplus</a>
@@ -212,7 +220,7 @@ $status_labels = [
                                 <span class="text-xs bg-brand/10 text-brand font-bold px-2 py-0.5 rounded"><?= htmlspecialchars($p['nama_toko']) ?></span>
                                 <h3 class="font-bold text-gray-900 text-lg leading-snug"><?= htmlspecialchars($p['nama_produk']) ?></h3>
                                 <p class="text-sm text-gray-500"><?= $p['jumlah'] ?> <?= htmlspecialchars($p['satuan']) ?> x Rp <?= number_format($p['harga_diskon'] ?: $p['harga_asli'], 0, ',', '.') ?></p>
-                                
+
                                 <div class="pt-2 text-xs text-gray-500 space-y-1">
                                     <p>📍 Alamat Pengiriman: <strong><?= htmlspecialchars($p['alamat_pengiriman']) ?></strong></p>
                                     <p>📞 Kontak Pembeli: <strong><?= htmlspecialchars($p['no_telepon']) ?></strong></p>
@@ -268,10 +276,10 @@ $status_labels = [
         <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 relative">
             <button onclick="closeUploadModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-xl font-bold">×</button>
             <h3 class="text-lg font-bold text-gray-900 mb-4">📤 Unggah Bukti Pembayaran</h3>
-            
+
             <form method="POST" enctype="multipart/form-data">
                 <input type="hidden" name="transaksi_id" id="upload_transaksi_id">
-                
+
                 <div class="border-2 border-dashed border-gray-300 rounded-xl p-6 text-center mb-4 hover:border-brand transition">
                     <input type="file" name="bukti" accept="image/*" required class="hidden" id="buktiFile" onchange="previewFile()">
                     <label for="buktiFile" class="cursor-pointer space-y-2 block">
@@ -281,7 +289,7 @@ $status_labels = [
                     </label>
                     <div id="filePreviewName" class="mt-2 text-xs font-semibold text-green-600 hidden"></div>
                 </div>
-                
+
                 <button type="submit" name="upload_bukti" class="w-full py-3 bg-brand hover:bg-brand-dark text-white font-semibold rounded-xl transition shadow cursor-pointer">
                     Simpan & Konfirmasi
                 </button>
@@ -294,15 +302,15 @@ $status_labels = [
         <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 relative">
             <button onclick="closeBatalModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-xl font-bold">×</button>
             <h3 class="text-lg font-bold text-gray-900 mb-4">🛑 Batalkan Pesanan</h3>
-            
+
             <form method="POST">
                 <input type="hidden" name="transaksi_id" id="batal_transaksi_id">
-                
+
                 <div class="mb-4">
                     <label class="block text-sm font-medium text-gray-700 mb-1">Alasan Pembatalan *</label>
                     <textarea name="alasan_pembatalan" rows="3" required placeholder="Tuliskan alasan pembatalan Anda..." class="w-full px-4 py-2 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none resize-none transition text-sm"></textarea>
                 </div>
-                
+
                 <button type="submit" name="batalkan_pesanan" class="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl transition shadow cursor-pointer">
                     Konfirmasi Pembatalan
                 </button>
@@ -316,20 +324,22 @@ $status_labels = [
             document.getElementById('upload_transaksi_id').value = id;
             document.getElementById('uploadModal').classList.remove('hidden');
         }
+
         function closeUploadModal() {
             document.getElementById('uploadModal').classList.add('hidden');
             document.getElementById('buktiFile').value = '';
             document.getElementById('filePreviewName').classList.add('hidden');
         }
-        
+
         function openBatalModal(id) {
             document.getElementById('batal_transaksi_id').value = id;
             document.getElementById('batalModal').classList.remove('hidden');
         }
+
         function closeBatalModal() {
             document.getElementById('batalModal').classList.add('hidden');
         }
-        
+
         function previewFile() {
             const fileInput = document.getElementById('buktiFile');
             const preview = document.getElementById('filePreviewName');
@@ -340,4 +350,5 @@ $status_labels = [
         }
     </script>
 </body>
+
 </html>

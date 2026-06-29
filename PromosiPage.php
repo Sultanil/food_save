@@ -89,9 +89,12 @@ $produk_list = [];
 $query_produk = "SELECT 
                     p.id, p.penjual_id, p.nama_produk, p.kategori, p.deskripsi, 
                     p.harga_asli, p.harga_diskon, p.stok, p.satuan, p.gambar_url, 
-                    pj.nama_toko, pj.kota, pj.foto_profil as toko_foto
+                    pj.nama_toko, pj.kota, pj.foto_profil as toko_foto,
+                    COALESCE(AVG(u.rating), 0) as avg_rating,
+                    COUNT(u.id) as total_ulasan
                  FROM produk p 
                  JOIN penjual pj ON p.penjual_id = pj.id 
+                 LEFT JOIN ulasan u ON p.id = u.produk_id
                  WHERE p.status = 'aktif' AND p.stok > 0";
 
 $params = [];
@@ -101,7 +104,7 @@ if (!empty($filter_kategori)) {
     $params[] = $filter_kategori;
 }
 
-$query_produk .= " ORDER BY pj.nama_toko, p.created_at DESC";
+$query_produk .= " GROUP BY p.id ORDER BY pj.nama_toko, p.created_at DESC";
 
 $stmt = $pdo->prepare($query_produk);
 $stmt->execute($params);
@@ -134,6 +137,8 @@ while ($row = $stmt->fetch()) {
         'toko_foto' => !empty($row['toko_foto']) && file_exists($row['toko_foto'])
             ? $row['toko_foto']
             : null,
+        'avg_rating' => round($row['avg_rating'] ?? 0, 1),  // ✅ TAMBAHKAN INI
+        'total_ulasan' => $row['total_ulasan'] ?? 0,         // ✅ TAMBAHKAN INI
     ];
 }
 $produk_json = json_encode($produk_list, JSON_UNESCAPED_UNICODE);
@@ -572,6 +577,7 @@ $kategori_icons = [
         <div id="grid-toko" class="max-w-6xl mx-auto px-6 py-6">
             <!-- Diisi oleh JavaScript -->
         </div>
+
         <!-- ═══ EDUKASI FOOD WASTE ═══ -->
         <div class="max-w-6xl mx-auto px-6 py-10">
             <div class="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200 rounded-3xl p-8 shadow-sm">
@@ -674,6 +680,7 @@ $kategori_icons = [
 
     <!-- ═══ HALAMAN DETAIL PRODUK ═══ -->
     <div id="detail-page" class="page">
+        <!-- Product Info Card -->
         <div class="max-w-lg mx-auto my-16 bg-white rounded-2xl p-9 shadow-xl text-center">
             <img id="dImg" src="" alt="" class="w-full h-52 object-cover rounded-xl mb-5" />
             <h2 id="dName" class="text-2xl font-extrabold text-slate-800 mb-2"></h2>
@@ -705,6 +712,33 @@ $kategori_icons = [
                         ⚡ Beli Sekarang (Checkout Langsung)
                     </button>
                 </form>
+            </div>
+        </div>
+
+        <!-- ✅ SECTION ULASAN -->
+        <div class="max-w-4xl mx-auto px-6 pb-10">
+            <h2 class="text-2xl font-bold text-gray-900 mb-6">Ulasan Pembeli</h2>
+
+            <!-- Rating Summary -->
+            <div class="bg-white rounded-xl p-6 mb-6 shadow-sm">
+                <div class="flex items-center gap-6">
+                    <div class="text-center flex-1">
+                        <div class="text-5xl font-bold text-gray-900" id="ulasan-avg-rating">0.0</div>
+                        <div class="text-yellow-400 text-2xl mt-1" id="ulasan-stars">
+                            ☆☆☆☆☆
+                        </div>
+                        <div class="text-sm text-gray-500 mt-1">
+                            <span id="ulasan-total">0</span> ulasan
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Daftar Ulasan -->
+            <div id="ulasan-list" class="space-y-4">
+                <div class="text-center text-gray-500 py-8">
+                    Memuat ulasan...
+                </div>
             </div>
         </div>
     </div>

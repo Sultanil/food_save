@@ -3,8 +3,7 @@
 let currentTokoId = null;
 let currentProduct = null;
 
-// Render daftar toko
-// Render daftar toko
+// ═══ RENDER DAFTAR TOKO ═══
 function renderToko() {
     const grid = document.getElementById('grid-toko');
     if (!grid) return;
@@ -21,23 +20,14 @@ function renderToko() {
         return;
     }
 
-    // Warna untuk fallback
     const colors = ['bg-green-500', 'bg-blue-500', 'bg-purple-500', 'bg-yellow-500', 'bg-pink-500', 'bg-indigo-500'];
-
     let html = '';
 
     TOKO.forEach((toko, index) => {
-        console.log(`\n🏪 Toko #${index}: ${toko.nama_toko}`);
-        console.log('   foto_profil:', toko.foto_profil);
-
-        // Generate inisial
         const initial = toko.nama_toko.charAt(0).toUpperCase();
         const colorClass = colors[toko.penjual_id % colors.length];
-
-        // Cek apakah ada foto
         const hasPhoto = toko.foto_profil && toko.foto_profil.toString().trim() !== '';
 
-        // Buat HTML untuk avatar
         let avatarHtml = '';
         if (hasPhoto) {
             avatarHtml = `
@@ -79,7 +69,7 @@ function renderToko() {
     console.log('✅ Grid toko berhasil di-render dengan', TOKO.length, 'toko');
 }
 
-// Pilih toko & tampilkan produk
+// ═══ PILIH TOKO & TAMPILKAN PRODUK ═══
 function pilihToko(penjualId) {
     penjualId = String(penjualId);
     currentTokoId = penjualId;
@@ -111,37 +101,56 @@ function pilihToko(penjualId) {
             </div>`;
     } else {
         grid.innerHTML = `
-            <div class="col-span-full mb-6">
-                <h2 class="text-2xl font-bold text-gray-800">Produk dari ${toko.nama_toko}</h2>
-                <p class="text-gray-500">${produkToko.length} produk tersedia</p>
-            </div>
-            ${produkToko.map(p => `
-                <div class="card bg-white rounded-2xl shadow-md overflow-hidden">
-                    <img src="${p.img}" alt="${p.name}" class="w-full h-48 object-cover"/>
-                    <div class="p-4">
-                        ${p.disc ? `<span class="text-xs font-extrabold bg-red-500 text-white px-2 py-1 rounded inline-block mb-2">${p.disc}</span>` : ''}
-                        <div class="font-bold text-gray-800 text-sm mb-2 line-clamp-2">${p.name}</div>
-                        <div class="flex gap-2 items-center mb-3">
-                            <span class="font-extrabold text-green-600 text-lg">${p.nw}</span>
-                            ${p.ol ? `<span class="text-gray-400 line-through text-xs">${p.ol}</span>` : ''}
+    <div class="col-span-full mb-6">
+        <h2 class="text-2xl font-bold text-gray-800">Produk dari ${toko.nama_toko}</h2>
+        <p class="text-gray-500">${produkToko.length} produk tersedia</p>
+    </div>
+    ${produkToko.map(p => `
+        <!-- ✅ ONCLICK ADA DI CARD (bukan cuma di gambar) -->
+        <div class="card bg-white rounded-2xl shadow-md overflow-hidden cursor-pointer hover:shadow-xl transition-all"
+             onclick="openDetailByProduct(${p.produk_id})">
+            
+            <!-- Gambar juga bisa diklik -->
+            <img src="${p.img}" 
+                 alt="${p.name}" 
+                 class="w-full h-48 object-cover hover:scale-105 transition-transform cursor-pointer"
+                 onclick="openDetailByProduct(${p.produk_id})"/>
+            
+            <div class="p-4">
+                ${p.disc ? `<span class="text-xs font-extrabold bg-red-500 text-white px-2 py-1 rounded inline-block mb-2">${p.disc}</span>` : ''}
+                <div class="font-bold text-gray-800 text-sm mb-2 line-clamp-2">${p.name}</div>
+                
+                <!-- Rating (jika ada) -->
+                ${p.avg_rating > 0 ? `
+                    <div class="flex items-center gap-1 mb-2">
+                        <div class="text-yellow-400 text-sm">
+                            ${'★'.repeat(Math.round(p.avg_rating))}${'☆'.repeat(5 - Math.round(p.avg_rating))}
                         </div>
-                        <p class="text-xs text-gray-500 mb-3">Stok: ${p.stok} ${p.satuan}</p>
-                        
-                        <!-- ✅ DUA TOMBOL: Keranjang + Beli Langsung -->
-                        <div class="flex gap-2">
-                            <button class="flex-1 py-2 bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-bold rounded-lg text-sm"
-                                onclick="tambahKeKeranjang(${p.produk_id}, ${p.penjual_id}, this)">
-                                🛒 Keranjang
-                            </button>
-                            <button class="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg text-sm"
-                                onclick="window.location.href='HalamanTransaksi.php?produk_id=${p.produk_id}&penjual_id=${p.penjual_id}'">
-                                ⚡ Beli
-                            </button>
-                        </div>
+                        <span class="text-xs text-gray-500">(${p.total_ulasan})</span>
                     </div>
+                ` : ''}
+                
+                <div class="flex gap-2 items-center mb-3">
+                    <span class="font-extrabold text-green-600 text-lg">${p.nw}</span>
+                    ${p.ol ? `<span class="text-gray-400 line-through text-xs">${p.ol}</span>` : ''}
                 </div>
-            `).join('')}
-        `;
+                <p class="text-xs text-gray-500 mb-3">Stok: ${p.stok} ${p.satuan}</p>
+                
+                <!-- Tombol dengan event.stopPropagation() -->
+                <div class="flex gap-2" onclick="event.stopPropagation()">
+                    <button class="flex-1 py-2 bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-bold rounded-lg text-sm"
+                        onclick="event.stopPropagation(); tambahKeKeranjang(${p.produk_id}, ${p.penjual_id}, this)">
+                        🛒 Keranjang
+                    </button>
+                    <button class="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg text-sm"
+                        onclick="event.stopPropagation(); window.location.href='HalamanTransaksi.php?produk_id=${p.produk_id}&penjual_id=${p.penjual_id}'">
+                        ⚡ Beli
+                    </button>
+                </div>
+            </div>
+        </div>
+    `).join('')}
+`;
     }
 
     const tokoPage = document.getElementById('toko-page');
@@ -153,7 +162,7 @@ function pilihToko(penjualId) {
     }
 }
 
-// Kembali ke daftar toko
+// ═══ KEMBALI KE DAFTAR TOKO ═══
 function kembaliKeToko() {
     currentTokoId = null;
     const tokoPage = document.getElementById('toko-page');
@@ -165,9 +174,28 @@ function kembaliKeToko() {
     }
 }
 
-// Buka detail produk
+// ═══ BUKA DETAIL PRODUK BY ID ═══
+function openDetailByProduct(produk_id) {
+    console.log('🔍 [OPEN DETAIL] Mencari produk ID:', produk_id);
+    console.log('📦 Total produk di array:', PRODUK.length);
+
+    const produk = PRODUK.find(p => (p.produk_id || p.id) === produk_id);
+
+    if (!produk) {
+        console.error('❌ Produk tidak ditemukan:', produk_id);
+        console.log('📋 ID produk yang tersedia:', PRODUK.map(p => p.produk_id));
+        alert('Produk tidak ditemukan! Cek console untuk detail.');
+        return;
+    }
+
+    console.log('✅ [OPEN DETAIL] Produk ditemukan:', produk.name);
+    openDetail(produk);
+}
+
+// ═══ BUKA DETAIL PRODUK ═══
 function openDetail(p) {
     currentProduct = p;
+    console.log('📦 [OPEN DETAIL] Membuka detail:', p.name);
 
     document.getElementById('dImg').src = p.img;
     document.getElementById('dName').textContent = p.name;
@@ -185,28 +213,137 @@ function openDetail(p) {
         document.getElementById('fIdToko').value = p.penjual_id;
     }
 
+    // ✅ LOAD ULASAN
+    loadUlasan(p.produk_id || p.id);
+
     document.getElementById('produk-page').classList.remove('active');
     document.getElementById('detail-page').classList.add('active');
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-// Kembali ke daftar produk toko
+// ═══ KEMBALI KE DAFTAR PRODUK TOKO ═══
 function kembaliKeProduk() {
     currentProduct = null;
     document.getElementById('detail-page').classList.remove('active');
     document.getElementById('produk-page').classList.add('active');
 }
 
-// ═══ FUNGSI TAMBAH KE KERANJANG (GLOBAL) ═══
+// ═══ LOAD ULASAN DARI SERVER ═══
+async function loadUlasan(produk_id) {
+    console.log('📝 [LOAD ULASAN] Memuat ulasan untuk produk ID:', produk_id);
+
+    const avgRatingEl = document.getElementById('ulasan-avg-rating');
+    const starsEl = document.getElementById('ulasan-stars');
+    const totalEl = document.getElementById('ulasan-total');
+    const listEl = document.getElementById('ulasan-list');
+
+    // Show loading
+    if (listEl) {
+        listEl.innerHTML = `
+            <div class="text-center text-gray-500 py-8">
+                <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
+                <p>Memuat ulasan...</p>
+            </div>
+        `;
+    }
+
+    try {
+        const response = await fetch(`api/get_ulasan.php?produk_id=${produk_id}`);
+        const data = await response.json();
+
+        console.log('📝 [LOAD ULASAN] Response:', data);
+
+        if (data.success) {
+            // Update rating summary
+            if (avgRatingEl) {
+                avgRatingEl.textContent = data.avg_rating.toFixed(1);
+            }
+
+            if (starsEl) {
+                const rating = Math.round(data.avg_rating);
+                let stars = '';
+                for (let i = 1; i <= 5; i++) {
+                    stars += i <= rating ? '★' : '☆';
+                }
+                starsEl.textContent = stars;
+            }
+
+            if (totalEl) {
+                totalEl.textContent = data.total_ulasan;
+            }
+
+            // Render daftar ulasan
+            if (listEl) {
+                if (data.ulasan.length === 0) {
+                    listEl.innerHTML = `
+                        <div class="bg-white rounded-xl p-8 text-center shadow-sm">
+                            <div class="text-6xl mb-4">💬</div>
+                            <p class="text-gray-500">Belum ada ulasan untuk produk ini.</p>
+                            <p class="text-sm text-gray-400 mt-2">Jadilah yang pertama memberikan ulasan!</p>
+                        </div>
+                    `;
+                } else {
+                    listEl.innerHTML = data.ulasan.map(ulasan => {
+                        let stars = '';
+                        for (let i = 1; i <= 5; i++) {
+                            stars += i <= ulasan.rating ? '★' : '☆';
+                        }
+
+                        const tanggal = new Date(ulasan.created_at).toLocaleDateString('id-ID', {
+                            day: 'numeric',
+                            month: 'long',
+                            year: 'numeric'
+                        });
+
+                        return `
+                            <div class="bg-white rounded-xl p-6 shadow-sm">
+                                <div class="flex items-start justify-between mb-3">
+                                    <div>
+                                        <h4 class="font-semibold text-gray-900">${ulasan.nama_lengkap}</h4>
+                                        <p class="text-xs text-gray-400">${tanggal}</p>
+                                    </div>
+                                    <div class="text-yellow-400 text-lg">
+                                        ${stars}
+                                    </div>
+                                </div>
+                                <p class="text-gray-700 leading-relaxed">${ulasan.komentar.replace(/\n/g, '<br>')}</p>
+                            </div>
+                        `;
+                    }).join('');
+                }
+            }
+
+            console.log('✅ [LOAD ULASAN] Berhasil dimuat!');
+        } else {
+            console.error('❌ [LOAD ULASAN] Error:', data.message);
+            if (listEl) {
+                listEl.innerHTML = `
+                    <div class="bg-red-50 rounded-xl p-6 text-center">
+                        <p class="text-red-600">Gagal memuat ulasan</p>
+                    </div>
+                `;
+            }
+        }
+    } catch (error) {
+        console.error('❌ [LOAD ULASAN] Exception:', error);
+        if (listEl) {
+            listEl.innerHTML = `
+                <div class="bg-red-50 rounded-xl p-6 text-center">
+                    <p class="text-red-600">Terjadi kesalahan saat memuat ulasan</p>
+                </div>
+            `;
+        }
+    }
+}
+
+// ═══ FUNGSI TAMBAH KE KERANJANG ═══
 function tambahKeKeranjang(produk_id, id_toko, btnElement) {
     const btn = btnElement;
     const originalHTML = btn.innerHTML;
 
-    // Disable button & show loading
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ...';
 
-    // Kirim AJAX
     fetch('actions/tambah_ke_keranjang.php', {
         method: 'POST',
         headers: {
@@ -217,7 +354,6 @@ function tambahKeKeranjang(produk_id, id_toko, btnElement) {
         .then(response => response.json())
         .then(data => {
             if (data.status === 'success') {
-                // Update badge keranjang di navbar
                 const badge = document.querySelector('.cart-badge-count');
                 if (badge) {
                     badge.textContent = data.total_items;
@@ -225,14 +361,12 @@ function tambahKeKeranjang(produk_id, id_toko, btnElement) {
                     setTimeout(() => badge.classList.remove('animate-bounce'), 1000);
                 }
 
-                // Tampilkan notifikasi
                 if (data.cart_cleared) {
                     alert('⚠️ ' + data.message);
                 } else {
                     alert('✅ ' + data.message);
                 }
 
-                // Update tombol
                 btn.innerHTML = '✅';
                 setTimeout(() => {
                     btn.innerHTML = originalHTML;
@@ -253,11 +387,10 @@ function tambahKeKeranjang(produk_id, id_toko, btnElement) {
         });
 }
 
-// ═══ EVENT LISTENER untuk tombol di detail-page ═══
+// ═══ EVENT LISTENER ═══
 document.addEventListener('DOMContentLoaded', function () {
     renderToko();
 
-    // Event listener untuk tombol di detail-page (kalau ada)
     const btnAddCart = document.getElementById('btnAddCart');
     if (btnAddCart) {
         btnAddCart.addEventListener('click', function (e) {
