@@ -76,125 +76,128 @@ $selected_role = isset($_GET['role']) && $_GET['role'] === 'penjual' ? 'penjual'
     </style>
 </head>
 
-<body class="bg-gradient-foodsave min-h-screen flex flex-col justify-center items-center p-4">
+<body class="bg-gradient-foodsave min-h-screen flex flex-col">
 
-    <div class="w-full max-w-md mb-5">
-        <!-- Brand -->
-        <div class="text-center mb-8">
-            <h1 class="text-[#4CAF50] text-4xl font-bold mb-2"><?= htmlspecialchars($site_name) ?></h1>
-            <p class="text-gray-600 text-sm">Platform jual beli makanan surplus yang berkelanjutan</p>
-        </div>
+    <!-- ✅ HEADER FULL WIDTH -->
+    <?php include 'includes/header.php'; ?>
 
-        <!-- Form Card -->
-        <div class="bg-white p-8 rounded-2xl shadow-lg">
-            <h2 class="text-2xl font-semibold text-gray-800 mb-2">Buat Akun Baru</h2>
-            <p class="text-gray-500 text-sm mb-6">Daftar untuk mulai menggunakan <?= htmlspecialchars($site_name) ?></p>
+    <!-- ✅ KONTEN TENGAH (CENTERED) -->
+    <main class="flex-grow flex flex-col justify-center items-center p-4">
+        <div class="w-full max-w-md mb-5">
+            <!-- Brand -->
+            <div class="text-center mb-8">
+                <h1 class="text-[#4CAF50] text-4xl font-bold mb-2"><?= htmlspecialchars($site_name) ?></h1>
+                <p class="text-gray-600 text-sm">Platform jual beli makanan surplus yang berkelanjutan</p>
+            </div>
 
-            <!-- Error Message -->
-            <?php if ($error): ?>
-                <div class="bg-red-50 text-red-700 p-3 rounded-lg mb-5 text-center border-l-4 border-red-600">
-                    <?php echo htmlspecialchars($error); ?>
-                </div>
-            <?php endif; ?>
+            <!-- Form Card -->
+            <div class="bg-white p-8 rounded-2xl shadow-lg">
+                <h2 class="text-2xl font-semibold text-gray-800 mb-2">Buat Akun Baru</h2>
+                <p class="text-gray-500 text-sm mb-6">Daftar untuk mulai menggunakan <?= htmlspecialchars($site_name) ?></p>
 
-            <!-- Form action diarahkan ke actions/proses_register.php -->
-            <!-- AJAX -->
-            <form method="POST" id="registerForm">
-                <!-- Nama Lengkap Input -->
-                <div class="mb-5">
-                    <label class="block mb-2 font-semibold text-gray-800 text-sm">Nama Lengkap</label>
-                    <input type="text" name="nama_lengkap" placeholder="Nama Lengkap Anda" required
-                        class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm input-transition focus:outline-none focus:border-[#4CAF50]">
-                </div>
-
-                <!-- Username Input -->
-                <div class="mb-5">
-                    <label class="block mb-2 font-semibold text-gray-800 text-sm">Username</label>
-                    <input type="text" name="nama" placeholder="Pilih username" required
-                        class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm input-transition focus:outline-none focus:border-[#4CAF50]">
-                </div>
-
-                <!-- Email Input -->
-                <div class="mb-5">
-                    <label class="block mb-2 font-semibold text-gray-800 text-sm">Email</label>
-                    <input type="email" name="email" placeholder="nama@email.com" required
-                        class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm input-transition focus:outline-none focus:border-[#4CAF50]">
-                </div>
-
-                <!-- KABUPATEN/KOTA -->
-                <div class="mb-5">
-                    <label class="block mb-2 font-semibold text-gray-800 text-sm">Kabupaten/Kota</label>
-                    <select id="selectKabupaten" name="kabupaten" required
-                        class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4CAF50]">
-                        <option value="">-- Pilih Kabupaten/Kota --</option>
-                        <?php while ($kab = $stmtKab->fetch()): ?>
-                            <option value="<?= htmlspecialchars($kab['kabupaten']) ?>">
-                                <?= htmlspecialchars($kab['kabupaten']) ?>
-                            </option>
-                        <?php endwhile; ?>
-                    </select>
-                </div>
-
-                <!-- KECAMATAN (via AJAX) -->
-                <div class="mb-5">
-                    <label class="block mb-2 font-semibold text-gray-800 text-sm">Kecamatan</label>
-                    <select id="selectKecamatan" name="kecamatan" required disabled
-                        class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4CAF50] disabled:bg-gray-100">
-                        <option value="">-- Pilih kabupaten/kota terlebih dahulu --</option>
-                    </select>
-                </div>
-
-                <!-- KELURAHAN/KODE POS (via AJAX) -->
-                <div class="mb-5">
-                    <label class="block mb-2 font-semibold text-gray-800 text-sm">Kelurahan / Kode Pos</label>
-                    <select id="selectKelurahan" name="kode_pos" required disabled
-                        class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4CAF50] disabled:bg-gray-100">
-                        <option value="">-- Pilih kecamatan terlebih dahulu --</option>
-                    </select>
-                </div>
-
-                <!-- Password Input -->
-                <div class="mb-5">
-                    <label class="block mb-2 font-semibold text-gray-800 text-sm">Password</label>
-                    <input type="password" name="password" placeholder="Minimal 6 karakter" required minlength="6"
-                        class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm input-transition focus:outline-none focus:border-[#4CAF50]">
-                </div>
-
-                <!-- Role Selector -->
-                <div class="mb-6">
-                    <label class="block mb-3 font-semibold text-gray-800 text-sm">Daftar Sebagai</label>
-                    <div class="grid grid-cols-2 gap-3">
-                        <!-- Role: Pembeli -->
-                        <label class="role-card-wrapper cursor-pointer">
-                            <input type="radio" name="role" value="pembeli" <?= $selected_role === 'pembeli' ? 'checked' : '' ?>>
-                            <div class="role-card-inner border-2 border-gray-300 rounded-lg p-4 text-center input-transition">
-                                <h3 class="font-semibold text-gray-800 mb-1">Pembeli</h3>
-                                <p class="text-xs text-gray-500">Cari dan beli makanan surplus</p>
-                            </div>
-                        </label>
-
-                        <!-- Role: Penjual -->
-                        <label class="role-card-wrapper cursor-pointer">
-                            <input type="radio" name="role" value="penjual" <?= $selected_role === 'penjual' ? 'checked' : '' ?>>
-                            <div class="role-card-inner border-2 border-gray-300 rounded-lg p-4 text-center input-transition">
-                                <h3 class="font-semibold text-gray-800 mb-1">Penjual</h3>
-                                <p class="text-xs text-gray-500">Jual makanan surplus</p>
-                            </div>
-                        </label>
+                <!-- Error Message -->
+                <?php if ($error): ?>
+                    <div class="bg-red-50 text-red-700 p-3 rounded-lg mb-5 text-center border-l-4 border-red-600">
+                        <?php echo htmlspecialchars($error); ?>
                     </div>
-                </div>
+                <?php endif; ?>
 
-                <!-- Success/Error Message Container -->
-                <div id="message" class="hidden p-3 rounded-lg mb-4 text-center text-sm"></div>
+                <!-- Form -->
+                <form method="POST" id="registerForm">
+                    <!-- Nama Lengkap Input -->
+                    <div class="mb-5">
+                        <label class="block mb-2 font-semibold text-gray-800 text-sm">Nama Lengkap</label>
+                        <input type="text" name="nama_lengkap" placeholder="Nama Lengkap Anda" required
+                            class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm input-transition focus:outline-none focus:border-[#4CAF50]">
+                    </div>
 
-                <!-- Submit Button -->
-                <button type="submit" id="btnSubmit" name="submit"
-                    class="w-full py-3.5 bg-[#4CAF50] hover:bg-[#43a047] text-white font-semibold rounded-lg cursor-pointer transition-colors duration-300 mb-5">
-                    Daftar
-                </button>
-            </form>
+                    <!-- Username Input -->
+                    <div class="mb-5">
+                        <label class="block mb-2 font-semibold text-gray-800 text-sm">Username</label>
+                        <input type="text" name="nama" placeholder="Pilih username" required
+                            class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm input-transition focus:outline-none focus:border-[#4CAF50]">
+                    </div>
 
-            <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+                    <!-- Email Input -->
+                    <div class="mb-5">
+                        <label class="block mb-2 font-semibold text-gray-800 text-sm">Email</label>
+                        <input type="email" name="email" placeholder="nama@email.com" required
+                            class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm input-transition focus:outline-none focus:border-[#4CAF50]">
+                    </div>
+
+                    <!-- KABUPATEN/KOTA -->
+                    <div class="mb-5">
+                        <label class="block mb-2 font-semibold text-gray-800 text-sm">Kabupaten/Kota</label>
+                        <select id="selectKabupaten" name="kabupaten" required
+                            class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4CAF50]">
+                            <option value="">-- Pilih Kabupaten/Kota --</option>
+                            <?php while ($kab = $stmtKab->fetch()): ?>
+                                <option value="<?= htmlspecialchars($kab['kabupaten']) ?>">
+                                    <?= htmlspecialchars($kab['kabupaten']) ?>
+                                </option>
+                            <?php endwhile; ?>
+                        </select>
+                    </div>
+
+                    <!-- KECAMATAN (via AJAX) -->
+                    <div class="mb-5">
+                        <label class="block mb-2 font-semibold text-gray-800 text-sm">Kecamatan</label>
+                        <select id="selectKecamatan" name="kecamatan" required disabled
+                            class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4CAF50] disabled:bg-gray-100">
+                            <option value="">-- Pilih kabupaten/kota terlebih dahulu --</option>
+                        </select>
+                    </div>
+
+                    <!-- KELURAHAN/KODE POS (via AJAX) -->
+                    <div class="mb-5">
+                        <label class="block mb-2 font-semibold text-gray-800 text-sm">Kelurahan / Kode Pos</label>
+                        <select id="selectKelurahan" name="kode_pos" required disabled
+                            class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4CAF50] disabled:bg-gray-100">
+                            <option value="">-- Pilih kecamatan terlebih dahulu --</option>
+                        </select>
+                    </div>
+
+                    <!-- Password Input -->
+                    <div class="mb-5">
+                        <label class="block mb-2 font-semibold text-gray-800 text-sm">Password</label>
+                        <input type="password" name="password" placeholder="Minimal 6 karakter" required minlength="6"
+                            class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm input-transition focus:outline-none focus:border-[#4CAF50]">
+                    </div>
+
+                    <!-- Role Selector -->
+                    <div class="mb-6">
+                        <label class="block mb-3 font-semibold text-gray-800 text-sm">Daftar Sebagai</label>
+                        <div class="grid grid-cols-2 gap-3">
+                            <!-- Role: Pembeli -->
+                            <label class="role-card-wrapper cursor-pointer">
+                                <input type="radio" name="role" value="pembeli" <?= $selected_role === 'pembeli' ? 'checked' : '' ?>>
+                                <div class="role-card-inner border-2 border-gray-300 rounded-lg p-4 text-center input-transition">
+                                    <h3 class="font-semibold text-gray-800 mb-1">Pembeli</h3>
+                                    <p class="text-xs text-gray-500">Cari dan beli makanan surplus</p>
+                                </div>
+                            </label>
+
+                            <!-- Role: Penjual -->
+                            <label class="role-card-wrapper cursor-pointer">
+                                <input type="radio" name="role" value="penjual" <?= $selected_role === 'penjual' ? 'checked' : '' ?>>
+                                <div class="role-card-inner border-2 border-gray-300 rounded-lg p-4 text-center input-transition">
+                                    <h3 class="font-semibold text-gray-800 mb-1">Penjual</h3>
+                                    <p class="text-xs text-gray-500">Jual makanan surplus</p>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Success/Error Message Container -->
+                    <div id="message" class="hidden p-3 rounded-lg mb-4 text-center text-sm"></div>
+
+                    <!-- Submit Button -->
+                    <button type="submit" id="btnSubmit" name="submit"
+                        class="w-full py-3.5 bg-[#4CAF50] hover:bg-[#43a047] text-white font-semibold rounded-lg cursor-pointer transition-colors duration-300 mb-5">
+                        Daftar
+                    </button>
+                </form>
+                <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 
             <!-- ===== SCRIPT AJAX FILTER KODE POS ===== -->
             <script>
@@ -254,7 +257,7 @@ $selected_role = isset($_GET['role']) && $_GET['role'] === 'penjual' ? 'penjual'
 
                     $.ajax({
                         url: 'actions/get_kelurahan_by_kecamatan.php',
-                        type: 'GET',    
+                        type: 'GET',
                         data: {
                             kecamatan: kecamatan
                         },
@@ -343,19 +346,23 @@ $selected_role = isset($_GET['role']) && $_GET['role'] === 'penjual' ? 'penjual'
                 });
             </script>
 
-            <!-- Login Link -->
-            <p class="text-center text-sm text-gray-600">
-                Sudah punya akun?
-                <a href="LoginPage.php" class="text-[#4CAF50] font-semibold hover:underline">Masuk di sini</a>
-            </p>
+                <!-- Login Link -->
+                <p class="text-center text-sm text-gray-600">
+                    Sudah punya akun?
+                    <a href="LoginPage.php" class="text-[#4CAF50] font-semibold hover:underline">Masuk di sini</a>
+                </p>
+            </div>
         </div>
+    </main>
 
-        <!-- Footer -->
-        <footer class="text-center text-gray-600 text-sm py-5 w-full">
-            <p>&copy; <?= date('Y') ?> <?= htmlspecialchars($site_name) ?> - Tugas Semester 2</p>
-        </footer>
-    </div>
+    <!-- ✅ FOOTER FULL WIDTH -->
+    <?php include 'includes/footer.php'; ?>
+
+    <!-- Scripts -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        // ... (script AJAX dan register tetap sama)
+    </script>
 
 </body>
-
 </html>
