@@ -27,12 +27,10 @@ if (isset($_GET['error'])) {
     unset($_SESSION['register_error']); // Hapus setelah ditampilkan
 }
 
-// Ambil list kode pos untuk dropdown
-$kode_pos_list = $pdo->query("SELECT kode_pos, kecamatan, kelurahan FROM kode_pos ORDER BY kecamatan, kelurahan");
-
-// Cek error query
-if (!$kode_pos_list) {
-    die("Error query kode_pos: " . $pdo->errorInfo()[2]);
+// Ambil list KECAMATAN unik untuk dropdown pertama
+$stmtKec = $pdo->query("SELECT DISTINCT kecamatan FROM kode_pos ORDER BY kecamatan");
+if (!$stmtKec) {
+    die("Error query kecamatan: " . $pdo->errorInfo()[2]);
 }
 
 // Role yang dipilih (default: pembeli)
@@ -123,18 +121,28 @@ $selected_role = isset($_GET['role']) && $_GET['role'] === 'penjual' ? 'penjual'
                         class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm input-transition focus:outline-none focus:border-[#4CAF50]">
                 </div>
 
-                <!-- Kode Pos Dropdown -->
+                <!-- ===== DROPDOWN KECAMATAN (BARU) ===== -->
                 <div class="mb-5">
-                    <label class="block mb-2 font-semibold text-gray-800 text-sm">Kode Pos</label>
-                    <select name="kode_pos" required
+                    <label class="block mb-2 font-semibold text-gray-800 text-sm">Kecamatan</label>
+                    <select id="selectKecamatan" name="kecamatan" required
                         class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4CAF50]">
-                        <option value="">Pilih Kecamatan & Kelurahan</option>
-                        <?php while ($kp = $kode_pos_list->fetch()): ?>
-                            <option value="<?= htmlspecialchars($kp['kode_pos']) ?>">
-                                <?= htmlspecialchars($kp['kecamatan']) ?> - <?= htmlspecialchars($kp['kelurahan']) ?> (<?= $kp['kode_pos'] ?>)
+                        <option value="">-- Pilih Kecamatan --</option>
+                        <?php while ($kec = $stmtKec->fetch()): ?>
+                            <option value="<?= htmlspecialchars($kec['kecamatan']) ?>">
+                                <?= htmlspecialchars($kec['kecamatan']) ?>
                             </option>
                         <?php endwhile; ?>
                     </select>
+                </div>
+
+                <!-- ===== DROPDOWN KELURAHAN / KODE POS (DIISI VIA AJAX) ===== -->
+                <div class="mb-5">
+                    <label class="block mb-2 font-semibold text-gray-800 text-sm">Kelurahan / Kode Pos</label>
+                    <select id="selectKelurahan" name="kode_pos" required disabled
+                        class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4CAF50] disabled:bg-gray-100 disabled:cursor-not-allowed">
+                        <option value="">-- Pilih kecamatan terlebih dahulu --</option>
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">Pilih kecamatan terlebih dahulu untuk memuat daftar kelurahan</p>
                 </div>
 
                 <!-- Password Input -->
@@ -179,6 +187,60 @@ $selected_role = isset($_GET['role']) && $_GET['role'] === 'penjual' ? 'penjual'
             </form>
 
             <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+            <!-- ===== SCRIPT AJAX FILTER KODE POS ===== -->
+            <script>
+                // Saat dropdown kecamatan berubah, ambil daftar kelurahan via AJAX
+                $('#selectKecamatan').on('change', function() {
+                    const kecamatan = $(this).val();
+                    const selectKel = $('#selectKelurahan');
+
+                    // Reset & disable dropdown kelurahan
+                    selectKel.empty()
+                        .append('<option value="">Memuat data...</option>')
+                        .prop('disabled', true)
+                        .addClass('bg-gray-100');
+
+                    // Jika kecamatan kosong, kembalikan ke state awal
+                    if (!kecamatan) {
+                        selectKel.empty()
+                            .append('<option value="">-- Pilih kecamatan terlebih dahulu --</option>');
+                        return;
+                    }
+
+                    // Request AJAX ke server
+                    $.ajax({
+                        url: 'actions/get_kelurahan_by_kecamatan.php',
+                        type: 'GET',
+                        data: { kecamatan: kecamatan },
+                        dataType: 'json',
+                        success: function(response) {
+                            selectKel.empty().append('<option value="">-- Pilih Kelurahan --</option>');
+
+                            if (response.status === 'success' && response.data.length > 0) {
+                                // Tambahkan setiap kelurahan sebagai option
+                                response.data.forEach(function(item) {
+                                    selectKel.append(
+                                        `<option value="${item.kode_pos}">${item.kelurahan} (${item.kode_pos})</option>`
+                                    );
+                                });
+                                // Aktifkan dropdown
+                                selectKel.prop('disabled', false).removeClass('bg-gray-100');
+                            } else {
+                                selectKel.append('<option value="">Data kelurahan tidak ditemukan</option>');
+                            }
+                        },
+                        error: function(xhr, status, error) {
+                            selectKel.empty()
+                                .append('<option value="">Gagal memuat data. Coba lagi.</option>');
+                            console.error('AJAX Error:', status, error);
+                            console.error('Response:', xhr.responseText);
+                        }
+                    });
+                });
+            </script>
+
+            <!-- ===== SCRIPT AJAX REGISTER (EXISTING) ===== -->
             <script>
                 $('#registerForm').on('submit', function(e) {
                     e.preventDefault(); // Cegah form submit biasa
