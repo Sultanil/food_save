@@ -1,8 +1,8 @@
 <?php
 // actions/update_profil.php - Handle update profil (nama + foto)
 session_start();
-require_once '../config/database.php';
-require_once '../includes/session_check.php';
+require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/session_check.php';
 
 // Security check
 if (!isset($_SESSION['sudah_login'])) {
@@ -48,11 +48,13 @@ try {
     if (isset($_FILES['foto_profil']) && $_FILES['foto_profil']['error'] === UPLOAD_ERR_OK) {
         $file = $_FILES['foto_profil'];
         
-        // Validasi file
-        $allowed_types = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
+        // ===== VALIDASI FILE (Lebih Aman) =====
+        $allowed_ext = ['jpg', 'jpeg', 'png', 'webp'];
         $max_size = 2 * 1024 * 1024; // 2MB
         
-        if (!in_array($file['type'], $allowed_types)) {
+        $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+        
+        if (!in_array($ext, $allowed_ext)) {
             jsonResponse('error', 'Format file tidak valid! Gunakan JPG, PNG, atau WEBP.');
         }
         
@@ -60,24 +62,47 @@ try {
             jsonResponse('error', 'Ukuran file terlalu besar! Maksimal 2MB.');
         }
         
-        // Upload
-        $target_dir = 'uploads/profil/';
-        if (!file_exists($target_dir)) {
-            mkdir($target_dir, 0777, true);
+        // Validasi tambahan: pastikan file benar-benar gambar
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $mime = finfo_file($finfo, $file['tmp_name']);
+        finfo_close($finfo);
+        
+        $allowed_mime = ['image/jpeg', 'image/png', 'image/webp'];
+        if (!in_array($mime, $allowed_mime)) {
+            jsonResponse('error', 'File bukan gambar yang valid!');
         }
         
-        $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
-        $filename = 'profil_' . $user_id . '_' . time() . '.' . $ext;
-        $target_file = $target_dir . $filename;
+        // ===== PATH UPLOAD (DIPERBAIKI!) =====
+        // Path absolut untuk proses upload (di root project, BUKAN di actions/)
+        $upload_dir_abs = __DIR__ . '/../uploads/profil/';
         
-        if (move_uploaded_file($file['tmp_name'], $target_file)) {
-            // Hapus foto lama jika ada
-            if (!empty($user['foto_profil']) && file_exists($user['foto_profil'])) {
-                unlink($user['foto_profil']);
+        // Buat folder kalau belum ada
+        if (!file_exists($upload_dir_abs)) {
+            if (!mkdir($upload_dir_abs, 0755, true)) {
+                jsonResponse('error', 'Gagal membuat folder upload! Cek permission.');
             }
-            $foto_profil = $target_file;
+        }
+        
+        // Generate nama file unik
+        $filename = 'profil_' . $user_id . '_' . time() . '.' . $ext;
+        $target_file_abs = $upload_dir_abs . $filename;
+        
+        // Path RELATIVE untuk disimpan di database (dari root project)
+        $foto_profil_db = 'uploads/profil/' . $filename;
+        
+        // Pindahkan file
+        if (move_uploaded_file($file['tmp_name'], $target_file_abs)) {
+            // Hapus foto lama jika ada (pakai path absolut!)
+            if (!empty($user['foto_profil'])) {
+                $old_file_abs = __DIR__ . '/../' . $user['foto_profil'];
+                if (file_exists($old_file_abs)) {
+                    @unlink($old_file_abs);
+                }
+            }
+            // Update variabel untuk disimpan ke DB
+            $foto_profil = $foto_profil_db;
         } else {
-            jsonResponse('error', 'Gagal mengupload foto profil!');
+            jsonResponse('error', 'Gagal mengupload foto profil! Error code: ' . $file['error']);
         }
     }
     
@@ -88,6 +113,9 @@ try {
     // Update session
     $_SESSION['nama'] = $nama_lengkap;
     $_SESSION['nama_lengkap'] = $nama_lengkap;
+    if ($foto_profil !== $user['foto_profil']) {
+        $_SESSION['foto_profil'] = $foto_profil;
+    }
     
     jsonResponse('success', 'Profil berhasil diperbarui!', ['foto_profil' => $foto_profil]);
 } catch (PDOException $e) {

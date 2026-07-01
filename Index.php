@@ -136,10 +136,30 @@ $top_stores = $pdo->query("
                             <button onclick="toggleProfileDropdown()" class="flex items-center gap-2 text-sm font-medium text-gray-700 hover:text-primary transition bg-gray-50 hover:bg-gray-100 px-3 py-2 rounded-xl border border-gray-200">
                                 <div class="w-7 h-7 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center text-white text-xs font-bold overflow-hidden">
                                     <?php
+                                    // Ambil data dari session
+                                    $foto_profil = $_SESSION['foto_profil'] ?? '';
                                     $nama_user = $_SESSION['nama_lengkap'] ?? $_SESSION['nama'] ?? 'U';
                                     $initial = strtoupper(substr($nama_user, 0, 1));
-                                    echo $initial;
+
+                                    // Cek apakah foto ada dan file benar-benar ada di server
+                                    $show_foto = false;
+                                    if (!empty($foto_profil) && file_exists(__DIR__ . '/' . $foto_profil)) {
+                                        $show_foto = true;
+                                    }
                                     ?>
+
+                                    <?php if ($show_foto): ?>
+                                        <!-- Tampilkan foto profil -->
+                                        <img src="<?= htmlspecialchars($foto_profil) . '?v=' . time() ?>"
+                                            alt="<?= htmlspecialchars($nama_user) ?>"
+                                            class="w-full h-full object-cover"
+                                            onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                        <!-- Fallback initial (hidden by default) -->
+                                        <span class="hidden items-center justify-center w-full h-full"><?= $initial ?></span>
+                                    <?php else: ?>
+                                        <!-- Tampilkan initial kalau tidak ada foto -->
+                                        <span><?= $initial ?></span>
+                                    <?php endif; ?>
                                 </div>
                                 <span class="hidden sm:block max-w-[100px] truncate"><?= htmlspecialchars($nama_user) ?></span>
                                 <i class="fas fa-chevron-down text-xs text-gray-400"></i>
@@ -147,6 +167,27 @@ $top_stores = $pdo->query("
 
                             <!-- Dropdown Menu -->
                             <div id="profileDropdownMenu" class="hidden absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-gray-100 py-2 z-50">
+
+                                <!-- Header dengan info user -->
+                                <div class="px-4 py-3 border-b border-gray-100 mb-1">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center text-white text-sm font-bold overflow-hidden">
+                                            <?php if ($show_foto): ?>
+                                                <img src="<?= htmlspecialchars($foto_profil) . '?v=' . time() ?>"
+                                                    alt="<?= htmlspecialchars($nama_user) ?>"
+                                                    class="w-full h-full object-cover"
+                                                    onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                                <span class="hidden items-center justify-center w-full h-full"><?= $initial ?></span>
+                                            <?php else: ?>
+                                                <span><?= $initial ?></span>
+                                            <?php endif; ?>
+                                        </div>
+                                        <div class="flex-1 min-w-0">
+                                            <p class="text-sm font-semibold text-gray-900 truncate"><?= htmlspecialchars($nama_user) ?></p>
+                                            <p class="text-xs text-gray-500 capitalize"><?= htmlspecialchars($_SESSION['role'] ?? 'user') ?></p>
+                                        </div>
+                                    </div>
+                                </div>
 
                                 <!-- Menu Items -->
                                 <a href="edit_profil.php" class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition">
@@ -178,6 +219,32 @@ $top_stores = $pdo->query("
                                 </a>
                             </div>
                         </div>
+
+                        <script>
+                            function toggleProfileDropdown(event) {
+                                if (event) event.stopPropagation();
+                                const menu = document.getElementById('profileDropdownMenu');
+                                menu.classList.toggle('hidden');
+                            }
+
+                            // Tutup dropdown kalau klik di luar
+                            document.addEventListener('click', function(event) {
+                                const dropdown = document.getElementById('profileDropdown');
+                                const menu = document.getElementById('profileDropdownMenu');
+
+                                if (dropdown && !dropdown.contains(event.target)) {
+                                    menu.classList.add('hidden');
+                                }
+                            });
+
+                            // Tutup dropdown saat tekan ESC
+                            document.addEventListener('keydown', function(event) {
+                                if (event.key === 'Escape') {
+                                    const menu = document.getElementById('profileDropdownMenu');
+                                    if (menu) menu.classList.add('hidden');
+                                }
+                            });
+                        </script>
 
                     <?php else: ?>
                         <a href="LoginPage.php" class="px-5 py-2.5 text-gray-700 font-semibold hover:text-primary transition">
