@@ -2,16 +2,16 @@
 require_once '../config/database.php';
 header('Content-Type: application/json');
 
-$kecamatan = $_GET['kecamatan'] ?? '';
+$kabupaten = $_GET['kabupaten'] ?? '';
 
 try {
-    $stmt = $pdo->prepare("SELECT kelurahan, kode_pos FROM kode_pos WHERE kecamatan = ? ORDER BY kelurahan");
-    $stmt->execute([$kecamatan]);
-    $kelurahans = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $stmt = $pdo->prepare("SELECT DISTINCT kecamatan FROM kode_pos WHERE kabupaten = ? ORDER BY kecamatan");
+    $stmt->execute([$kabupaten]);
+    $kecamatans = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     echo json_encode([
         'status' => 'success',
-        'data' => $kelurahans
+        'data' => $kecamatans
     ]);
 } catch (PDOException $e) {
     echo json_encode([

@@ -27,11 +27,11 @@ if (isset($_GET['error'])) {
     unset($_SESSION['register_error']); // Hapus setelah ditampilkan
 }
 
-// Ambil list KECAMATAN unik untuk dropdown pertama
-$stmtKec = $pdo->query("SELECT DISTINCT kecamatan FROM kode_pos ORDER BY kecamatan");
-if (!$stmtKec) {
-    die("Error query kecamatan: " . $pdo->errorInfo()[2]);
-}
+// Ambil list KABUPATEN/KOTA unik
+$stmtKab = $pdo->query("SELECT DISTINCT kabupaten FROM kode_pos ORDER BY kabupaten");
+
+// Ambil list KECAMATAN (masih kosong, nanti diisi via AJAX)
+$stmtKec = $pdo->query("SELECT DISTINCT kecamatan FROM kode_pos WHERE kabupaten = '' ORDER BY kecamatan");
 
 // Role yang dipilih (default: pembeli)
 $selected_role = isset($_GET['role']) && $_GET['role'] === 'penjual' ? 'penjual' : 'pembeli';
@@ -121,28 +121,36 @@ $selected_role = isset($_GET['role']) && $_GET['role'] === 'penjual' ? 'penjual'
                         class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm input-transition focus:outline-none focus:border-[#4CAF50]">
                 </div>
 
-                <!-- ===== DROPDOWN KECAMATAN (BARU) ===== -->
+                <!-- KABUPATEN/KOTA -->
                 <div class="mb-5">
-                    <label class="block mb-2 font-semibold text-gray-800 text-sm">Kecamatan</label>
-                    <select id="selectKecamatan" name="kecamatan" required
+                    <label class="block mb-2 font-semibold text-gray-800 text-sm">Kabupaten/Kota</label>
+                    <select id="selectKabupaten" name="kabupaten" required
                         class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4CAF50]">
-                        <option value="">-- Pilih Kecamatan --</option>
-                        <?php while ($kec = $stmtKec->fetch()): ?>
-                            <option value="<?= htmlspecialchars($kec['kecamatan']) ?>">
-                                <?= htmlspecialchars($kec['kecamatan']) ?>
+                        <option value="">-- Pilih Kabupaten/Kota --</option>
+                        <?php while ($kab = $stmtKab->fetch()): ?>
+                            <option value="<?= htmlspecialchars($kab['kabupaten']) ?>">
+                                <?= htmlspecialchars($kab['kabupaten']) ?>
                             </option>
                         <?php endwhile; ?>
                     </select>
                 </div>
 
-                <!-- ===== DROPDOWN KELURAHAN / KODE POS (DIISI VIA AJAX) ===== -->
+                <!-- KECAMATAN (via AJAX) -->
+                <div class="mb-5">
+                    <label class="block mb-2 font-semibold text-gray-800 text-sm">Kecamatan</label>
+                    <select id="selectKecamatan" name="kecamatan" required disabled
+                        class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4CAF50] disabled:bg-gray-100">
+                        <option value="">-- Pilih kabupaten/kota terlebih dahulu --</option>
+                    </select>
+                </div>
+
+                <!-- KELURAHAN/KODE POS (via AJAX) -->
                 <div class="mb-5">
                     <label class="block mb-2 font-semibold text-gray-800 text-sm">Kelurahan / Kode Pos</label>
                     <select id="selectKelurahan" name="kode_pos" required disabled
-                        class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4CAF50] disabled:bg-gray-100 disabled:cursor-not-allowed">
+                        class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg text-sm focus:outline-none focus:border-[#4CAF50] disabled:bg-gray-100">
                         <option value="">-- Pilih kecamatan terlebih dahulu --</option>
                     </select>
-                    <p class="text-xs text-gray-500 mt-1">Pilih kecamatan terlebih dahulu untuk memuat daftar kelurahan</p>
                 </div>
 
                 <!-- Password Input -->
@@ -190,49 +198,81 @@ $selected_role = isset($_GET['role']) && $_GET['role'] === 'penjual' ? 'penjual'
 
             <!-- ===== SCRIPT AJAX FILTER KODE POS ===== -->
             <script>
-                // Saat dropdown kecamatan berubah, ambil daftar kelurahan via AJAX
+                // Level 1: Kabupaten → Kecamatan
+                $('#selectKabupaten').on('change', function() {
+                    const kabupaten = $(this).val();
+                    const selectKec = $('#selectKecamatan');
+                    const selectKel = $('#selectKelurahan');
+
+                    // Reset dropdown kecamatan & kelurahan
+                    selectKec.empty().append('<option value="">Memuat...</option>').prop('disabled', true);
+                    selectKel.empty().append('<option value="">-- Pilih kecamatan terlebih dahulu --</option>').prop('disabled', true);
+
+                    if (!kabupaten) {
+                        selectKec.empty().append('<option value="">-- Pilih kabupaten/kota terlebih dahulu --</option>');
+                        return;
+                    }
+
+                    $.ajax({
+                        url: 'actions/get_kecamatan_by_kabupaten.php',
+                        type: 'GET',
+                        data: {
+                            kabupaten: kabupaten
+                        },
+                        dataType: 'json',
+                        success: function(response) {
+                            selectKec.empty().append('<option value="">-- Pilih Kecamatan --</option>');
+
+                            if (response.status === 'success' && response.data.length > 0) {
+                                response.data.forEach(function(item) {
+                                    selectKec.append(`<option value="${item.kecamatan}">${item.kecamatan}</option>`);
+                                });
+                                selectKec.prop('disabled', false).removeClass('bg-gray-100');
+                            } else {
+                                selectKec.append('<option value="">Data kecamatan tidak ditemukan</option>');
+                            }
+                        },
+                        error: function(xhr, status, error) {
+                            selectKec.empty().append('<option value="">Gagal memuat data. Coba lagi.</option>');
+                            console.error('AJAX Error:', status, error);
+                            console.error('Response:', xhr.responseText);
+                        }
+                    });
+                });
+
+                // Level 2: Kecamatan → Kelurahan
                 $('#selectKecamatan').on('change', function() {
                     const kecamatan = $(this).val();
                     const selectKel = $('#selectKelurahan');
 
-                    // Reset & disable dropdown kelurahan
-                    selectKel.empty()
-                        .append('<option value="">Memuat data...</option>')
-                        .prop('disabled', true)
-                        .addClass('bg-gray-100');
+                    selectKel.empty().append('<option value="">Memuat...</option>').prop('disabled', true);
 
-                    // Jika kecamatan kosong, kembalikan ke state awal
                     if (!kecamatan) {
-                        selectKel.empty()
-                            .append('<option value="">-- Pilih kecamatan terlebih dahulu --</option>');
+                        selectKel.empty().append('<option value="">-- Pilih kecamatan terlebih dahulu --</option>');
                         return;
                     }
 
-                    // Request AJAX ke server
                     $.ajax({
                         url: 'actions/get_kelurahan_by_kecamatan.php',
-                        type: 'GET',
-                        data: { kecamatan: kecamatan },
+                        type: 'GET',    
+                        data: {
+                            kecamatan: kecamatan
+                        },
                         dataType: 'json',
                         success: function(response) {
                             selectKel.empty().append('<option value="">-- Pilih Kelurahan --</option>');
 
                             if (response.status === 'success' && response.data.length > 0) {
-                                // Tambahkan setiap kelurahan sebagai option
                                 response.data.forEach(function(item) {
-                                    selectKel.append(
-                                        `<option value="${item.kode_pos}">${item.kelurahan} (${item.kode_pos})</option>`
-                                    );
+                                    selectKel.append(`<option value="${item.kode_pos}">${item.kelurahan} (${item.kode_pos})</option>`);
                                 });
-                                // Aktifkan dropdown
                                 selectKel.prop('disabled', false).removeClass('bg-gray-100');
                             } else {
                                 selectKel.append('<option value="">Data kelurahan tidak ditemukan</option>');
                             }
                         },
                         error: function(xhr, status, error) {
-                            selectKel.empty()
-                                .append('<option value="">Gagal memuat data. Coba lagi.</option>');
+                            selectKel.empty().append('<option value="">Gagal memuat data. Coba lagi.</option>');
                             console.error('AJAX Error:', status, error);
                             console.error('Response:', xhr.responseText);
                         }
