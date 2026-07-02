@@ -13,13 +13,24 @@ $user_id = $_SESSION['user_id'] ?? $_SESSION['id_user'] ?? 0;
 $error = '';
 $success = '';
 
-// Ambil list kode pos untuk dropdown (PDO)
-$kode_pos_list = $pdo->query("SELECT kode_pos, kecamatan, kelurahan FROM kode_pos ORDER BY kecamatan, kelurahan");
+// ===== AMBIL DAFTAR KECAMATAN UNIK (untuk dropdown pertama) =====
+$stmtKec = $pdo->query("SELECT DISTINCT kecamatan FROM kode_pos ORDER BY kecamatan");
+if (!$stmtKec) {
+    die("Error query kecamatan: " . $pdo->errorInfo()[2]);
+}
 
 // Cek apakah sudah punya data toko
 $cek = $pdo->prepare("SELECT * FROM penjual WHERE user_id = ?");
 $cek->execute([$user_id]);
 $toko = $cek->fetch(PDO::FETCH_ASSOC);
+
+// ===== AMBIL KECAMATAN DARI KODE POS YANG SUDAH TERSIMPAN (untuk resubmit) =====
+$existing_kecamatan = '';
+if ($toko && !empty($toko['kode_pos'])) {
+    $stmtKecExisting = $pdo->prepare("SELECT kecamatan FROM kode_pos WHERE kode_pos = ? LIMIT 1");
+    $stmtKecExisting->execute([$toko['kode_pos']]);
+    $existing_kecamatan = $stmtKecExisting->fetchColumn() ?: '';
+}
 
 if ($toko) {
     // Jika sudah disetujui atau sedang pending, jangan izinkan edit
@@ -39,25 +50,55 @@ if (isset($_POST['submit'])) {
     $no_telp = trim($_POST['no_telp'] ?? '');
     $nik = trim($_POST['nik'] ?? '');
     $kode_pos = trim($_POST['kode_pos'] ?? '');
+    $kecamatan = trim($_POST['kecamatan'] ?? '');
+
+    // ===== VALIDASI KECOCOKAN KODE POS DENGAN KECAMATAN =====
+    if (!empty($kode_pos) && !empty($kecamatan)) {
+        $stmtValidasi = $pdo->prepare("SELECT COUNT(*) FROM kode_pos WHERE kode_pos = ? AND kecamatan = ?");
+        $stmtValidasi->execute([$kode_pos, $kecamatan]);
+        if ($stmtValidasi->fetchColumn() == 0) {
+            $error = "Kode pos tidak valid untuk kecamatan yang dipilih!";
+        }
+    }
 
     // ==================== UPLOAD FOTO KTP ====================
     $foto_ktp = $toko['foto_ktp'] ?? '';
     if (isset($_FILES['foto_ktp']) && $_FILES['foto_ktp']['error'] === UPLOAD_ERR_OK) {
-        $target_dir = "uploads/ktp/";
-        if (!file_exists($target_dir)) {
-            mkdir($target_dir, 0777, true);
+        $file = $_FILES['foto_ktp'];
+        
+        // Validasi tipe file
+        $allowed_types = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
+        if (!in_array($file['type'], $allowed_types)) {
+            $error = $error ?: "Format foto KTP tidak valid! Gunakan JPG, PNG, atau WEBP.";
         }
-
-        $file_extension = pathinfo($_FILES["foto_ktp"]["name"], PATHINFO_EXTENSION);
-        $new_filename = "ktp_" . $user_id . "_" . time() . "_" . uniqid() . "." . $file_extension;
-        $target_file = $target_dir . $new_filename;
-
-        if (move_uploaded_file($_FILES["foto_ktp"]["tmp_name"], $target_file)) {
-            // Hapus file lama jika ada
-            if (!empty($toko['foto_ktp']) && file_exists($toko['foto_ktp'])) {
-                unlink($toko['foto_ktp']);
+        
+        // Validasi ukuran (Maks 5MB untuk KTP)
+        if ($file['size'] > 5 * 1024 * 1024) {
+            $error = $error ?: "Ukuran foto KTP terlalu besar! Maksimal 5MB.";
+        }
+        
+        if (empty($error)) {
+            $target_dir = __DIR__ . "/uploads/ktp/";
+            if (!file_exists($target_dir)) {
+                mkdir($target_dir, 0755, true);
             }
-            $foto_ktp = $target_file;
+
+            $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+            $new_filename = "ktp_" . $user_id . "_" . time() . "_" . uniqid() . "." . $ext;
+            $target_file = $target_dir . $new_filename;
+
+            if (move_uploaded_file($file['tmp_name'], $target_file)) {
+                // Hapus file lama jika ada
+                if (!empty($toko['foto_ktp'])) {
+                    $old_file = __DIR__ . '/' . $toko['foto_ktp'];
+                    if (file_exists($old_file)) {
+                        @unlink($old_file);
+                    }
+                }
+                $foto_ktp = "uploads/ktp/" . $new_filename;
+            } else {
+                $error = $error ?: "Gagal mengupload foto KTP!";
+            }
         }
     }
 
@@ -69,41 +110,44 @@ if (isset($_POST['submit'])) {
         // Validasi tipe file
         $allowed_types = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
         if (!in_array($file['type'], $allowed_types)) {
-            $error = "Format foto tidak valid! Gunakan JPG, PNG, atau WEBP.";
+            $error = $error ?: "Format foto tidak valid! Gunakan JPG, PNG, atau WEBP.";
         }
         
         // Validasi ukuran (Maks 2MB)
         if ($file['size'] > 2 * 1024 * 1024) {
-            $error = "Ukuran foto terlalu besar! Maksimal 2MB.";
+            $error = $error ?: "Ukuran foto terlalu besar! Maksimal 2MB.";
         }
         
         // Jika validasi lolos, upload file
         if (empty($error)) {
-            $target_dir = "uploads/profil_toko/";
+            $target_dir = __DIR__ . "/uploads/profil_toko/";
             if (!file_exists($target_dir)) {
-                mkdir($target_dir, 0777, true);
+                mkdir($target_dir, 0755, true);
             }
             
-            $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+            $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
             $new_filename = "toko_" . $user_id . "_" . time() . "_" . uniqid() . "." . $ext;
             $target_file = $target_dir . $new_filename;
             
             if (move_uploaded_file($file['tmp_name'], $target_file)) {
                 // Hapus file lama jika ada
-                if (!empty($toko['foto_profil']) && file_exists($toko['foto_profil'])) {
-                    unlink($toko['foto_profil']);
+                if (!empty($toko['foto_profil'])) {
+                    $old_file = __DIR__ . '/' . $toko['foto_profil'];
+                    if (file_exists($old_file)) {
+                        @unlink($old_file);
+                    }
                 }
-                $foto_profil = $target_file;
+                $foto_profil = "uploads/profil_toko/" . $new_filename;
             } else {
-                $error = "Gagal mengupload foto profil.";
+                $error = $error ?: "Gagal mengupload foto profil.";
             }
         }
     }
 
     // ==================== VALIDASI INPUT ====================
     if (empty($error)) {
-        if (empty($nama_toko) || empty($kota) || empty($nik) || empty($kode_pos)) {
-            $error = "Nama toko, kota, NIK, dan kode pos wajib diisi!";
+        if (empty($nama_toko) || empty($kota) || empty($nik) || empty($kode_pos) || empty($kecamatan)) {
+            $error = "Nama toko, kota, kecamatan, NIK, dan kode pos wajib diisi!";
         } elseif (strlen($nik) !== 16 || !is_numeric($nik)) {
             $error = "NIK harus terdiri dari 16 digit angka!";
         } elseif (empty($foto_ktp)) {
@@ -189,7 +233,7 @@ if (isset($_POST['submit'])) {
                 <div class="flex items-center gap-6">
                     <!-- Preview Area -->
                     <div class="w-32 h-32 rounded-2xl bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative group">
-                        <?php if (!empty($toko['foto_profil']) && file_exists($toko['foto_profil'])): ?>
+                        <?php if (!empty($toko['foto_profil']) && file_exists(__DIR__ . '/' . $toko['foto_profil'])): ?>
                             <img id="previewFotoToko" src="<?= htmlspecialchars($toko['foto_profil']) ?>" class="w-full h-full object-cover">
                         <?php else: ?>
                             <img id="previewFotoToko" src="" class="w-full h-full object-cover hidden">
@@ -237,23 +281,38 @@ if (isset($_POST['submit'])) {
                     class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none transition">
             </div>
 
+            <!-- ===== DROPDOWN KECAMATAN (BARU) ===== -->
             <div>
                 <label class="block text-sm font-semibold text-gray-700 mb-1">
-                    Kode Pos Toko <span class="text-red-500">*</span>
+                    Kecamatan <span class="text-red-500">*</span>
                 </label>
-                <select name="kode_pos" required
+                <select id="selectKecamatan" name="kecamatan" required
                     class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none bg-white transition">
-                    <option value="">Pilih Kecamatan & Kelurahan</option>
-                    <?php 
-                    // Reset pointer untuk loop kedua
-                    $kode_pos_list->execute();
-                    while ($kp = $kode_pos_list->fetch(PDO::FETCH_ASSOC)): 
-                    ?>
-                        <option value="<?= htmlspecialchars($kp['kode_pos']) ?>" <?= (isset($toko['kode_pos']) && $toko['kode_pos'] == $kp['kode_pos']) ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($kp['kecamatan']) ?> - <?= htmlspecialchars($kp['kelurahan']) ?> (<?= $kp['kode_pos'] ?>)
+                    <option value="">-- Pilih Kecamatan --</option>
+                    <?php while ($kec = $stmtKec->fetch(PDO::FETCH_ASSOC)): ?>
+                        <option value="<?= htmlspecialchars($kec['kecamatan']) ?>" 
+                            <?= ($existing_kecamatan === $kec['kecamatan']) ? 'selected' : '' ?>>
+                            <?= htmlspecialchars($kec['kecamatan']) ?>
                         </option>
                     <?php endwhile; ?>
                 </select>
+            </div>
+
+            <!-- ===== DROPDOWN KELURAHAN / KODE POS (DIISI VIA AJAX) ===== -->
+            <div>
+                <label class="block text-sm font-semibold text-gray-700 mb-1">
+                    Kelurahan / Kode Pos <span class="text-red-500">*</span>
+                </label>
+                <select id="selectKelurahan" name="kode_pos" required 
+                    <?= empty($existing_kecamatan) ? 'disabled' : '' ?>
+                    class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none bg-white transition disabled:bg-gray-100 disabled:cursor-not-allowed">
+                    <?php if (empty($existing_kecamatan)): ?>
+                        <option value="">-- Pilih kecamatan terlebih dahulu --</option>
+                    <?php else: ?>
+                        <option value="">Memuat data...</option>
+                    <?php endif; ?>
+                </select>
+                <p class="text-xs text-gray-500 mt-1">Pilih kecamatan terlebih dahulu untuk memuat daftar kelurahan</p>
             </div>
 
             <div>
@@ -313,7 +372,10 @@ if (isset($_POST['submit'])) {
         </div>
     </div>
 
-    <!-- Script untuk Preview Gambar (di bawah, bukan di tengah form) -->
+    <!-- jQuery untuk AJAX -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    
+    <!-- Script untuk Preview Gambar -->
     <script>
     function previewImage(input) {
         if (input.files && input.files[0]) {
@@ -331,6 +393,73 @@ if (isset($_POST['submit'])) {
             reader.readAsDataURL(input.files[0]);
         }
     }
+    </script>
+
+    <!-- ===== SCRIPT AJAX FILTER KODE POS ===== -->
+    <script>
+    // ===== Data untuk preselect saat resubmit =====
+    const existingKodePos = '<?= addslashes($toko['kode_pos'] ?? '') ?>';
+    const existingKecamatan = '<?= addslashes($existing_kecamatan) ?>';
+
+    // ===== Fungsi untuk load kelurahan via AJAX =====
+    function loadKelurahan(kecamatan, preselectKodePos = '') {
+        const selectKel = $('#selectKelurahan');
+
+        // Reset & disable dropdown kelurahan
+        selectKel.empty()
+            .append('<option value="">Memuat data...</option>')
+            .prop('disabled', true)
+            .addClass('bg-gray-100');
+
+        if (!kecamatan) {
+            selectKel.empty()
+                .append('<option value="">-- Pilih kecamatan terlebih dahulu --</option>');
+            return;
+        }
+
+        // Request AJAX ke server
+        $.ajax({
+            url: 'actions/get_kelurahan_by_kecamatan.php',
+            type: 'GET',
+            data: { kecamatan: kecamatan },
+            dataType: 'json',
+            success: function(response) {
+                selectKel.empty().append('<option value="">-- Pilih Kelurahan --</option>');
+
+                if (response.status === 'success' && response.data.length > 0) {
+                    response.data.forEach(function(item) {
+                        const isSelected = (preselectKodePos && preselectKodePos === item.kode_pos) ? 'selected' : '';
+                        selectKel.append(
+                            `<option value="${item.kode_pos}" ${isSelected}>${item.kelurahan} (${item.kode_pos})</option>`
+                        );
+                    });
+                    selectKel.prop('disabled', false).removeClass('bg-gray-100');
+                } else {
+                    selectKel.append('<option value="">Data kelurahan tidak ditemukan</option>');
+                }
+            },
+            error: function(xhr, status, error) {
+                selectKel.empty()
+                    .append('<option value="">Gagal memuat data. Coba lagi.</option>');
+                console.error('AJAX Error:', status, error);
+                console.error('Response:', xhr.responseText);
+            }
+        });
+    }
+
+    // ===== Event handler saat kecamatan berubah =====
+    $('#selectKecamatan').on('change', function() {
+        const kecamatan = $(this).val();
+        loadKelurahan(kecamatan); // Tidak ada preselect saat user ganti manual
+    });
+
+    // ===== Preselect untuk resubmit (saat halaman pertama kali load) =====
+    $(document).ready(function() {
+        if (existingKecamatan) {
+            // Trigger load kelurahan dengan preselect kode_pos yang sudah ada
+            loadKelurahan(existingKecamatan, existingKodePos);
+        }
+    });
     </script>
 
 </body>
