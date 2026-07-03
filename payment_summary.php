@@ -168,6 +168,14 @@ if (strlen($display_id) < 6) {
                 </div>
             </div>
 
+            <div class="bg-white rounded-xl shadow-sm p-6 mt-6 text-center">
+                <h3 class="text-lg font-semibold mb-2">Selesai?</h3>
+                <p class="text-gray-500 mb-4">Setelah pesanan diterima, jangan lupa beri ulasan ya!</p>
+                <a href="beri_ulasan.php" class="inline-block px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                    📝 Beri Ulasan Sekarang
+                </a>
+            </div>
+
             <!-- Info Rekening/QRIS Penjual -->
             <?php if (!empty($payment_methods)): ?>
                 <div class="bg-white border-2 border-gray-200 rounded-2xl p-6 mb-6">

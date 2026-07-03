@@ -1,7 +1,12 @@
 <?php
 session_start();
 require_once 'config/database.php';
-
+require_once 'includes/ulasan_functions.php'; 
+if (isset($_SESSION['sudah_login']) && isset($_SESSION['user_id'])) {
+    $belum_review = hitungBelumReview($pdo, $_SESSION['user_id']);
+} else {
+    $belum_review = 0;
+}
 // Ambil kategori produk
 $categories = $pdo->query("
     SELECT DISTINCT kategori 
@@ -31,6 +36,7 @@ $top_stores = $pdo->query("
     LIMIT 6
 ")->fetchAll(PDO::FETCH_ASSOC);
 ?>
+
 <!DOCTYPE html>
 <html lang="id">
 
@@ -119,6 +125,15 @@ $top_stores = $pdo->query("
                     <a href="#tentang" class="text-gray-700 hover:text-primary font-medium transition">Tentang</a>
                     <a href="PromosiPage.php" class="text-gray-700 hover:text-primary font-medium transition">Jelajah</a>
                 </div>
+
+                <a href="beri_ulasan.php" class="relative">
+                    Ulasan
+                    <?php if ($belum_review > 0): ?>
+                        <span class="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                            <?= $belum_review ?>
+                        </span>
+                    <?php endif; ?>
+                </a>
 
                 <!-- Auth Buttons -->
                 <div class="flex items-center gap-3">
@@ -264,65 +279,43 @@ $top_stores = $pdo->query("
         <!-- Pattern Overlay -->
         <div class="absolute inset-0 opacity-10" style="background-image: url('data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23ffffff\' fill-opacity=\'1\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E');"></div>
 
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 md:py-28 relative z-10">
-            <div class="grid md:grid-cols-2 gap-12 items-center">
+        <!-- Decorative Elements -->
+        <div class="absolute top-20 right-20 w-72 h-72 bg-yellow-400/10 rounded-full blur-3xl"></div>
+        <div class="absolute bottom-20 left-20 w-96 h-96 bg-green-400/10 rounded-full blur-3xl"></div>
 
-                <!-- Kiri: Teks -->
-                <div class="space-y-6 text-center md:text-left">
-                    <div class="inline-flex items-center gap-2 bg-white/20 backdrop-blur-sm px-4 py-2 rounded-full text-sm font-medium border border-white/30">
-                        <span class="w-2 h-2 bg-yellow-400 rounded-full animate-pulse"></span>
-                        Selamatkan Makanan, Selamatkan Bumi
-                    </div>
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 md:py-32 relative z-10">
+            <div class="text-center max-w-5xl mx-auto space-y-8">
 
-                    <h1 class="text-4xl md:text-6xl font-extrabold leading-tight">
-                        Makanan Berkualitas, <br>
-                        <span class="text-yellow-300">Harga Hemat</span>
-                    </h1>
-
-                    <p class="text-lg md:text-xl text-green-50 max-w-lg mx-auto md:mx-0">
-                        Temukan makanan surplus dari toko terdekat dengan diskon hingga 70%. Belanja bijak, ramah lingkungan.
-                    </p>
-
-                    <div class="flex flex-col sm:flex-row gap-4 pt-4 justify-center md:justify-start">
-                        <a href="PromosiPage.php" class="px-8 py-4 bg-white text-green-700 font-bold rounded-xl hover:bg-gray-100 transition shadow-xl text-center">
-                            🛒 Mulai Belanja
-                        </a>
-                        <a href="#cara-kerja" class="px-8 py-4 bg-green-800/50 backdrop-blur-sm text-white font-bold rounded-xl hover:bg-green-800/70 transition text-center border border-white/30">
-                            📖 Cara Kerja
-                        </a>
-                    </div>
+                <!-- Badge -->
+                <div class="inline-flex items-center gap-2 bg-white/20 backdrop-blur-sm px-5 py-2.5 rounded-full text-sm font-medium border border-white/30 animate-float">
+                    <span class="w-2 h-2 bg-yellow-400 rounded-full animate-pulse"></span>
+                    Selamatkan Makanan, Selamatkan Bumi
                 </div>
 
-                <!-- Kanan: Ilustrasi Stats (Pengganti Mockup Produk) -->
-                <div class="hidden md:grid grid-cols-2 gap-4">
-                    <!-- Card 1 -->
-                    <div class="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20 text-center transform hover:scale-105 transition duration-300">
-                        <div class="text-4xl mb-2">🍽️</div>
-                        <div class="text-3xl font-bold text-white mb-1">5,000+</div>
-                        <div class="text-green-100 text-sm">Makanan Terselamatkan</div>
-                    </div>
+                <!-- Main Heading - DIPERBESAR -->
+                <h1 class="text-5xl md:text-7xl lg:text-8xl font-extrabold leading-tight tracking-tight">
+                    Makanan Berkualitas, <br>
+                    <span class="text-yellow-300 drop-shadow-lg">Harga Hemat</span>
+                </h1>
 
-                    <!-- Card 2 -->
-                    <div class="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20 text-center transform hover:scale-105 transition duration-300 mt-8">
-                        <div class="text-4xl mb-2">🏪</div>
-                        <div class="text-3xl font-bold text-white mb-1">200+</div>
-                        <div class="text-green-100 text-sm">Mitra Toko</div>
-                    </div>
+                <!-- Subheading - DIPERBESAR -->
+                <p class="text-xl md:text-2xl text-green-50 max-w-3xl mx-auto leading-relaxed">
+                    Temukan makanan surplus dari toko terdekat dengan diskon hingga <span class="font-bold text-yellow-300">70%</span>. <br class="hidden md:block">
+                    Belanja bijak, ramah lingkungan, dan bantu kurangi food waste.
+                </p>
 
-                    <!-- Card 3 -->
-                    <div class="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20 text-center transform hover:scale-105 transition duration-300">
-                        <div class="text-4xl mb-2">😊</div>
-                        <div class="text-3xl font-bold text-white mb-1">3,000+</div>
-                        <div class="text-green-100 text-sm">Pengguna Puas</div>
-                    </div>
-
-                    <!-- Card 4 -->
-                    <div class="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-white/20 text-center transform hover:scale-105 transition duration-300 mt-8">
-                        <div class="text-4xl mb-2">🌍</div>
-                        <div class="text-3xl font-bold text-white mb-1">2,500 kg</div>
-                        <div class="text-green-100 text-sm">CO₂ Berkurang</div>
-                    </div>
+                <!-- CTA Buttons - DIPERBESAR -->
+                <div class="flex flex-col sm:flex-row gap-5 pt-6 justify-center">
+                    <a href="PromosiPage.php" class="px-10 py-5 bg-white text-green-700 font-bold rounded-xl hover:bg-gray-100 transition shadow-2xl text-lg group hover:scale-105">
+                        🛒 Mulai Belanja
+                        <i class="fas fa-arrow-right ml-2 group-hover:translate-x-1 transition-transform"></i>
+                    </a>
+                    <a href="#cara-kerja" class="px-10 py-5 bg-green-800/50 backdrop-blur-sm text-white font-bold rounded-xl hover:bg-green-800/70 transition border-2 border-white/30 text-lg hover:scale-105">
+                        📖 Cara Kerja
+                    </a>
                 </div>
+
+                <!-- Stats Inline (Pengganti Card) -->
 
             </div>
         </div>

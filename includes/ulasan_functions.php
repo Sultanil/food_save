@@ -1,101 +1,166 @@
 <?php
-/**
- * Fungsi-fungsi untuk sistem ulasan
- */
-
-/**
- * Cek apakah user sudah pernah review produk ini
- */
-function sudahReview($pdo, $user_id, $produk_id) {
-    $stmt = $pdo->prepare("SELECT id FROM ulasan WHERE user_id = ? AND produk_id = ?");
-    $stmt->execute([$user_id, $produk_id]);
-    return $stmt->rowCount() > 0;
-}
-
-/**
- * Tambah ulasan baru
- */
-function tambahUlasan($pdo, $data) {
+// ============================================
+// FUNGSI: Cek apakah user bisa review produk
+// ============================================
+function bisaReview($pdo, $user_id, $produk_id, $transaksi_id = null) {
     try {
-        $stmt = $pdo->prepare("
-            INSERT INTO ulasan (user_id, produk_id, transaksi_id, rating, komentar)
-            VALUES (?, ?, ?, ?, ?)
-        ");
+        $sql = "SELECT COUNT(*) FROM transaksi
+                WHERE user_id = :user_id 
+                AND produk_id = :produk_id
+                AND status IN ('selesai', 'dibayar')";
         
-        $stmt->execute([
-            $data['user_id'],
-            $data['produk_id'],
-            $data['transaksi_id'],
-            $data['rating'],
-            $data['komentar']
-        ]);
+        $params = [
+            'user_id' => $user_id,
+            'produk_id' => $produk_id
+        ];
         
-        return ['success' => true, 'message' => 'Ulasan berhasil ditambahkan!'];
+        if ($transaksi_id) {
+            $sql .= " AND id = :transaksi_id";
+            $params['transaksi_id'] = $transaksi_id;
+        }
+        
+        $sql .= " AND NOT EXISTS (
+                    SELECT 1 FROM ulasan 
+                    WHERE ulasan.user_id = transaksi.user_id 
+                    AND ulasan.produk_id = transaksi.produk_id
+                    AND ulasan.transaksi_id = transaksi.id
+                )";
+        
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        
+        return $stmt->fetchColumn() > 0;
     } catch (PDOException $e) {
-        return ['success' => false, 'message' => 'Gagal menambahkan ulasan: ' . $e->getMessage()];
+        error_log("Error bisaReview: " . $e->getMessage());
+        return false;
     }
 }
 
-/**
- * Ambil semua ulasan untuk produk tertentu
- */
-function getUlasanProduk($pdo, $produk_id, $limit = 10) {
-    $stmt = $pdo->prepare("
-        SELECT u.*, us.nama_lengkap, us.email
-        FROM ulasan u
-        JOIN users us ON u.user_id = us.id
-        WHERE u.produk_id = ?
-        ORDER BY u.created_at DESC
-        LIMIT ?
-    ");
-    $stmt->execute([$produk_id, $limit]);
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
-}
-
-/**
- * Hitung rata-rata rating produk
- */
-function getRataRatingProduk($pdo, $produk_id) {
-    $stmt = $pdo->prepare("
-        SELECT AVG(rating) as avg_rating, COUNT(*) as total_ulasan
-        FROM ulasan
-        WHERE produk_id = ?
-    ");
-    $stmt->execute([$produk_id]);
-    return $stmt->fetch(PDO::FETCH_ASSOC);
-}
-
-/**
- * Cek apakah user berhak review (sudah beli dan transaksi selesai)
- */
-function bisaReview($pdo, $user_id, $produk_id) {
-    // Cek apakah user pernah beli produk ini dan status selesai
-    $stmt = $pdo->prepare("
-        SELECT id FROM transaksi
-        WHERE user_id = ? 
-        AND produk_id = ? 
-        AND status = 'selesai'
-        LIMIT 1
-    ");
-    $stmt->execute([$user_id, $produk_id]);
-    return $stmt->rowCount() > 0;
-}
-
-/**
- * Ambil daftar transaksi yang bisa direview (status selesai & belum review)
- */
+// ============================================
+// FUNGSI: Ambil daftar transaksi yang bisa direview
+// ============================================
 function getTransaksiBisaReview($pdo, $user_id) {
-    $stmt = $pdo->prepare("
-        SELECT t.*, p.nama_produk, pj.nama_toko
-        FROM transaksi t
-        JOIN produk p ON t.produk_id = p.id
-        JOIN penjual pj ON p.penjual_id = pj.id
-        LEFT JOIN ulasan u ON t.id = u.transaksi_id
-        WHERE t.user_id = ? 
-        AND t.status = 'selesai'
-        AND u.id IS NULL
-        ORDER BY t.tanggal_pesanan DESC
-    ");
-    $stmt->execute([$user_id]);
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    try {
+        $sql = "SELECT 
+                    t.id AS transaksi_id,
+                    t.tanggal_pesanan,
+                    t.produk_id,
+                    t.jumlah,
+                    t.total_harga,
+                    p.nama_produk,
+                    p.gambar_url,
+                    p.harga_asli,
+                    pj.nama_toko,
+                    t.checkout_batch_id
+                FROM transaksi t
+                JOIN produk p ON t.produk_id = p.id
+                JOIN penjual pj ON t.penjual_id = pj.id
+                WHERE t.user_id = :user_id
+                AND t.status IN ('selesai', 'dibayar')
+                AND NOT EXISTS (
+                    SELECT 1 FROM ulasan u 
+                    WHERE u.user_id = t.user_id 
+                    AND u.produk_id = t.produk_id
+                    AND u.transaksi_id = t.id
+                )
+                ORDER BY t.tanggal_pesanan DESC";
+        
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(['user_id' => $user_id]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log("Error getTransaksiBisaReview: " . $e->getMessage());
+        return [];
+    }
+}
+
+// ============================================
+// FUNGSI: Tambah ulasan
+// ============================================
+function tambahUlasan($pdo, $data) {
+    try {
+        // Validasi: pastikan user memang punya transaksi ini
+        $check = $pdo->prepare("
+            SELECT COUNT(*) FROM transaksi
+            WHERE id = :transaksi_id 
+            AND user_id = :user_id
+            AND produk_id = :produk_id
+            AND status IN ('selesai', 'dibayar')
+        ");
+        $check->execute([
+            'transaksi_id' => $data['transaksi_id'],
+            'user_id' => $data['user_id'],
+            'produk_id' => $data['produk_id']
+        ]);
+        
+        if ($check->fetchColumn() == 0) {
+            return ['success' => false, 'message' => 'Data transaksi tidak valid atau belum selesai!'];
+        }
+        
+        // Cek apakah sudah pernah review
+        $checkReview = $pdo->prepare("
+            SELECT COUNT(*) FROM ulasan 
+            WHERE user_id = :user_id 
+            AND produk_id = :produk_id 
+            AND transaksi_id = :transaksi_id
+        ");
+        $checkReview->execute([
+            'user_id' => $data['user_id'],
+            'produk_id' => $data['produk_id'],
+            'transaksi_id' => $data['transaksi_id']
+        ]);
+        
+        if ($checkReview->fetchColumn() > 0) {
+            return ['success' => false, 'message' => 'Anda sudah memberikan ulasan untuk produk ini!'];
+        }
+
+        // Insert ulasan - TANPA kolom timestamp (auto-generated)
+        $sql = "INSERT INTO ulasan (user_id, produk_id, transaksi_id, rating, komentar) 
+                VALUES (:user_id, :produk_id, :transaksi_id, :rating, :komentar)";
+        
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([
+            'user_id' => $data['user_id'],
+            'produk_id' => $data['produk_id'],
+            'transaksi_id' => $data['transaksi_id'],
+            'rating' => $data['rating'],
+            'komentar' => $data['komentar']
+        ]);
+        
+        // Update rata-rata rating produk
+        $updateRating = $pdo->prepare("
+            UPDATE produk SET rating = (
+                SELECT AVG(rating) FROM ulasan WHERE produk_id = :produk_id
+            ) WHERE id = :produk_id
+        ");
+        $updateRating->execute(['produk_id' => $data['produk_id']]);
+        
+        return ['success' => true, 'message' => 'Ulasan berhasil dikirim! Terima kasih.'];
+    } catch (PDOException $e) {
+        error_log("Error tambahUlasan: " . $e->getMessage());
+        return ['success' => false, 'message' => 'Gagal menyimpan ulasan: ' . $e->getMessage()];
+    }
+}
+
+// ============================================
+// FUNGSI: Hitung jumlah produk yang perlu direview
+// ============================================
+function hitungBelumReview($pdo, $user_id) {
+    try {
+        $sql = "SELECT COUNT(*) FROM transaksi t
+                WHERE t.user_id = :user_id
+                AND t.status IN ('selesai', 'dibayar')
+                AND NOT EXISTS (
+                    SELECT 1 FROM ulasan u 
+                    WHERE u.user_id = t.user_id 
+                    AND u.produk_id = t.produk_id
+                    AND u.transaksi_id = t.id
+                )";
+        
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(['user_id' => $user_id]);
+        return (int)$stmt->fetchColumn();
+    } catch (PDOException $e) {
+        return 0;
+    }
 }

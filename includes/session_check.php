@@ -7,7 +7,7 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 // ️ TIMEOUT: 5 menit = 300 detik
-$timeout_duration = 10000;
+$timeout_duration = 300;
 
 // Cek apakah sudah login
 if (isset($_SESSION['sudah_login']) && $_SESSION['sudah_login'] === true) {

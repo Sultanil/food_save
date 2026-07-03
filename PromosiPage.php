@@ -574,8 +574,48 @@ $kategori_icons = [
         <?php endif; ?>
 
         <!-- Grid Toko -->
-        <div id="grid-toko" class="max-w-6xl mx-auto px-6 py-6">
-            <!-- Diisi oleh JavaScript -->
+        <div class="max-w-6xl mx-auto px-6 py-6">
+            <!-- Search Bar -->
+            <div class="mb-6">
+                <div class="relative max-w-md">
+                    <input type="text"
+                        id="searchInput"
+                        placeholder="🔍 Cari toko atau produk..."
+                        class="w-full px-5 py-3 pl-12 bg-white border-2 border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none transition">
+                    <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                </div>
+            </div>
+
+            <!-- Info Filter Aktif -->
+            <div id="filter-info" class="mb-4 hidden">
+                <div class="inline-flex items-center gap-2 bg-green-50 border border-green-200 px-4 py-2 rounded-full">
+                    <span class="text-sm text-gray-700">Menampilkan toko dengan produk kategori:</span>
+                    <span id="filter-kategori-text" class="font-bold text-green-700"></span>
+                    <a href="PromosiPage.php" class="ml-2 text-red-500 hover:text-red-700">
+                        <i class="fas fa-times-circle"></i>
+                    </a>
+                </div>
+            </div>
+
+            <!-- Counter Toko -->
+            <div class="mb-4 text-sm text-gray-600">
+                Menampilkan <strong id="toko-count">0</strong> toko
+            </div>
+
+            <!-- Grid Toko -->
+            <div id="grid-toko" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- Diisi oleh JavaScript -->
+            </div>
+
+            <!-- Empty State Toko -->
+            <div id="empty-toko" class="hidden text-center py-16">
+                <div class="text-6xl mb-4">🔍</div>
+                <h3 class="text-xl font-bold text-gray-900 mb-2">Tidak Ada Toko Ditemukan</h3>
+                <p class="text-gray-600 mb-6">Coba kata kunci lain atau reset filter</p>
+                <a href="PromosiPage.php" class="inline-block px-6 py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 transition">
+                    Reset Filter
+                </a>
+            </div>
         </div>
 
         <!-- ═══ EDUKASI FOOD WASTE ═══ -->
@@ -675,6 +715,13 @@ $kategori_icons = [
         <!-- Produk Grid -->
         <div id="grid-produk" class="max-w-6xl mx-auto px-6 py-10">
             <!-- Diisi oleh JavaScript -->
+        </div>
+
+        <!-- Empty State Produk -->
+        <div id="empty-produk" class="hidden text-center py-16">
+            <div class="text-6xl mb-4">📦</div>
+            <h3 class="text-xl font-bold text-gray-900 mb-2">Toko Ini Belum Punya Produk</h3>
+            <p class="text-gray-600">Coba kunjungi toko lain</p>
         </div>
     </div>
 
